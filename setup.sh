@@ -15,10 +15,10 @@ sudo apt install -y \
     git \
     python3-venv
 
-# Check if Docker is already installed
 if ! command -v docker >/dev/null 2>&1; then
     echo "Docker not found. Installing Docker..."
 
+    # Add Docker GPG key if missing
     echo "Adding Docker GPG key..."
     sudo mkdir -p /etc/apt/keyrings
     if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
@@ -51,17 +51,24 @@ fi
 
 docker --version
 
-echo "Setting up Python virtual environment..."
-python3 -m venv .venv
+if [ ! -d ".venv" ]; then
+    echo "Setting up Python virtual environment..."
+    python3 -m venv .venv
+else
+    echo "Python virtual environment already exists, skipping..."
+fi
 
-echo "Cloning project repository..."
 TMP_DIR=$(mktemp -d)
+echo "Cloning project repository..."
 git clone "https://github.com/Scrapman238/zenith-contained.git" "$TMP_DIR"
 
-cp -r "$TMP_DIR"/. /root/
+echo "Copying project files..."
+rsync -a --ignore-existing "$TMP_DIR/" /root/
+
 rm -rf "$TMP_DIR"
 
 echo "Installing Python dependencies..."
+.venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
 
 echo "Running the application..."
