@@ -1,9 +1,32 @@
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, session, redirect, url_for
+from functools import wraps
 from waitress import serve
-import docker
-import os
+import subprocess
 import requests
 import qrcode
+import docker
+import os
+
+def verify_root_password(password: str) -> bool:
+    try:
+        p = subprocess.run(
+            ["sudo", "-k", "-S", "true"],
+            input=password + "\n",
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return p.returncode == 0
+    except Exception:
+        return False
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("authenticated"):
+            return redirect("/login")
+        return f(*args, **kwargs)
+    return decorated
 
 RESET = "\033[0m"
 WHITE_FG = "\033[37m"
@@ -12,6 +35,7 @@ BLACK_FG = "\033[30m"
 BLACK_BG = "\033[40m"
 
 app = Flask(__name__, static_folder="static")
+app.secret_key = os.urandom(32)
 client = docker.from_env()
 
 # ZENITH_IMAGE_PATH = "/root/Zenith/docker_image/zenith-proxy.tar"
@@ -102,38 +126,72 @@ def create_container(name):
 
 # --- API routes ---
 @app.route("/api/containers")
+@login_required
 def api_list():
     return jsonify(list_containers())
 
 @app.route("/api/containers/add", methods=["POST"])
+@login_required
 def api_add():
     name = get_next_instance_name()
     create_container(name)
     return jsonify({"status": "created", "name": name})
 
 @app.route("/api/containers/<name>/start", methods=["POST"])
+@login_required
 def api_start(name):
     return jsonify({"status": start_container(name)})
 
 @app.route("/api/containers/<name>/stop", methods=["POST"])
+@login_required
 def api_stop(name):
     return jsonify({"status": stop_container(name)})
 
 @app.route("/api/containers/<name>/restart", methods=["POST"])
+@login_required
 def api_restart(name):
     return jsonify({"status": restart_container(name)})
 
 @app.route("/api/containers/<name>/delete", methods=["POST"])
+@login_required
 def api_delete(name):
     remove_container(name)
     return jsonify({"status": "deleted"})
 
 @app.route("/")
+@login_required
 def index():
     return send_from_directory("static", "index.html")
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if verify_root_password(password):
+            session["authenticated"] = True
+            return redirect("/")
+        return "Invalid password", 401
+
+    return """
+    <html>
+        <body>
+            <h2>Zenith Manager Login</h2>
+            <form method="POST">
+                <input type="password" name="password" placeholder="Root password" />
+                <button type="submit">Login</button>
+            </form>
+        </body>
+    </html>
+    """
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect("/login")
+
 # --- Serve static files ---
 @app.route("/<path:path>")
+@login_required
 def static_files(path):
     return send_from_directory("static", path)
 
