@@ -1,23 +1,21 @@
 from flask import Flask, render_template, jsonify, request
 from waitress import serve
 import docker
-import gzip
 import os
 
 app = Flask(__name__)
 client = docker.from_env()
 
-ZENITH_IMAGE_PATH = "/root/Zenith/docker_image/zenith-proxy.tar.gz"
+ZENITH_IMAGE_PATH = "/root/Zenith/docker_image/zenith-proxy.tar"
 ZENITH_IMAGE_NAME = "zenith-proxy:latest"
 
+# Load image on startup if not present
 def load_zenith_image():
     try:
         client.images.get(ZENITH_IMAGE_NAME)
     except docker.errors.ImageNotFound:
-        print("Loading Zenith image from gzipped tar...")
-        with gzip.open(ZENITH_IMAGE_PATH, "rb") as f:
-            client.images.load(f.read())
-        print("Zenith image loaded successfully!")
+        print("Loading Zenith image...")
+        client.images.load(open(ZENITH_IMAGE_PATH, "rb").read())
 
 load_zenith_image()
 
