@@ -1,9 +1,9 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from waitress import serve
-import requests
-import qrcode
 import docker
 import os
+import requests
+import qrcode
 
 RESET = "\033[0m"
 WHITE_FG = "\033[37m"
@@ -11,13 +11,13 @@ WHITE_BG = "\033[47m"
 BLACK_FG = "\033[30m"
 BLACK_BG = "\033[40m"
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")
 client = docker.from_env()
 
 ZENITH_IMAGE_PATH = "/root/Zenith/docker_image/zenith-proxy.tar"
 ZENITH_IMAGE_NAME = "zenith-proxy:latest"
 
-# Load image on startup if not present
+# --- Docker image loading ---
 def load_zenith_image():
     try:
         client.images.get(ZENITH_IMAGE_NAME)
@@ -27,13 +27,27 @@ def load_zenith_image():
 
 load_zenith_image()
 
-# Helper functions
+# --- Helper functions ---
 def list_containers():
     containers = client.containers.list(all=True, filters={"ancestor": ZENITH_IMAGE_NAME})
-    return [
-        {"id": c.id[:12], "name": c.name, "status": c.status}
-        for c in containers
-    ]
+    result = []
+    for i, c in enumerate(sorted(containers, key=lambda x: x.name)):
+        instance_number = int(c.name.replace("instance_", "")) if c.name.startswith("instance_") else i + 1
+        result.append({
+            "id": c.id[:12],
+            "name": c.name,
+            "instance": instance_number,
+            "account": "",  # empty for now
+            "status": c.status
+        })
+    return sorted(result, key=lambda x: x["instance"])
+
+def get_next_instance_name():
+    existing = [int(c["name"].replace("instance_", "")) for c in list_containers()]
+    i = 1
+    while i in existing:
+        i += 1
+    return f"instance_{i}"
 
 def start_container(name):
     c = client.containers.get(name)
@@ -59,14 +73,16 @@ def create_container(name):
     c = client.containers.create(ZENITH_IMAGE_NAME, name=name, detach=True)
     return c.status
 
-# Routes
-@app.route("/")
-def index():
-    return render_template("index.html", containers=list_containers())
-
+# --- API routes ---
 @app.route("/api/containers")
 def api_list():
     return jsonify(list_containers())
+
+@app.route("/api/containers/add", methods=["POST"])
+def api_add():
+    name = get_next_instance_name()
+    create_container(name)
+    return jsonify({"status": "created", "name": name})
 
 @app.route("/api/containers/<name>/start", methods=["POST"])
 def api_start(name):
@@ -85,14 +101,14 @@ def api_delete(name):
     remove_container(name)
     return jsonify({"status": "deleted"})
 
-@app.route("/api/containers/new", methods=["POST"])
-def api_new():
-    data = request.json
-    name = data.get("name").replace(" ", "_")
-    if not name:
-        return jsonify({"error": "Name required"}), 400
-    create_container(name)
-    return jsonify({"status": "created"})
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
+
+# --- Serve static files ---
+@app.route("/<path:path>")
+def static_files(path):
+    return send_from_directory("static", path)
 
 def get_public_ip():
     try:

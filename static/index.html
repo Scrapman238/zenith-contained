@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Zenith Proxy Manager</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        border: 1px solid #ccc;
+        padding: 8px;
+        text-align: left;
+      }
+      th {
+        background: #eee;
+      }
+      .action-btn {
+        cursor: pointer;
+        margin-left: 5px;
+      }
+      .delete-btn {
+        color: red;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Zenith Proxy Manager</h2>
+    <table id="instances">
+      <thead>
+        <tr>
+          <th>Instance</th>
+          <th>Account</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <button id="addBtn">Add Instance</button>
+
+    <script>
+      async function fetchContainers() {
+        const res = await fetch("/api/containers");
+        const data = await res.json();
+        const tbody = document.querySelector("#instances tbody");
+        tbody.innerHTML = "";
+        data.forEach((c) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${c.instance}</td>
+            <td>${c.account}</td>
+            <td>${c.status}</td>
+            <td>
+                <span class="action-btn" onclick="start('${c.name}')">Start</span>
+                <span class="action-btn" onclick="stop('${c.name}')">Stop</span>
+                <span class="action-btn" onclick="restart('${c.name}')">Restart</span>
+                <span class="action-btn delete-btn" onclick="del('${c.name}')">Delete</span>
+            </td>`;
+          tbody.appendChild(tr);
+        });
+      }
+
+      async function start(name) {
+        await fetch(`/api/containers/${name}/start`, { method: "POST" });
+      }
+      async function stop(name) {
+        await fetch(`/api/containers/${name}/stop`, { method: "POST" });
+      }
+      async function restart(name) {
+        await fetch(`/api/containers/${name}/restart`, { method: "POST" });
+      }
+      async function del(name) {
+        if (confirm(`Delete ${name}?`)) {
+          await fetch(`/api/containers/${name}/delete`, { method: "POST" });
+        }
+      }
+
+      document.getElementById("addBtn").onclick = async () => {
+        await fetch("/api/containers/add", { method: "POST" });
+      };
+
+      setInterval(fetchContainers, 1000);
+      fetchContainers();
+    </script>
+  </body>
+</html>
