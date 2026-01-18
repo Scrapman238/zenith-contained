@@ -6,13 +6,15 @@ cd /root
 echo "Updating package index..."
 sudo apt update -y
 
-echo "Installing prerequisites..."
-sudo apt install -y \
-    ca-certificates \
-    curl \
-    git \
-    python3-venv \
-    rsync
+# --- Install Git LFS ---
+if ! command -v git-lfs >/dev/null 2>&1; then
+    echo "Installing Git LFS..."
+    curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
+    sudo apt install -y git-lfs
+    git lfs install
+else
+    echo "Git LFS already installed. Skipping..."
+fi
 
 # --- Docker installation ---
 if ! command -v docker >/dev/null 2>&1; then
@@ -44,10 +46,16 @@ REPO_URL="https://github.com/Scrapman238/zenith-contained.git"
 if [ -d "zenith-contained" ]; then
     echo "Updating existing project..."
     git -C zenith-contained pull
+    cd zenith-contained
+    git lfs pull  # <- pull the actual large files
+    cd ..
 else
     echo "Cloning project repository..."
     git clone "$REPO_URL" "$TMP_DIR"
+    cd "$TMP_DIR"
+    git lfs pull  # <- pull LFS files
     rsync -a --ignore-existing "$TMP_DIR/" /root/Zenith/
+    cd /root/Zenith/
     rm -rf "$TMP_DIR"
 fi
 
