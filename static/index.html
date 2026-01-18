@@ -3,89 +3,271 @@
   <head>
     <meta charset="UTF-8" />
     <title>Zenith Proxy Manager</title>
+
+    <!-- MDI Icons -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css"
+      rel="stylesheet"
+    />
+
     <style>
       body {
         font-family: sans-serif;
         padding: 20px;
-        background: #f5f5f5;
+        background: #111;
+        color: white;
       }
-      table {
-        width: 100%;
-        border-collapse: collapse;
+
+      h2 {
+        margin-bottom: 20px;
       }
-      th,
-      td {
-        border: 1px solid #ccc;
-        padding: 8px;
-        text-align: left;
+
+      #instances {
+        list-style: none;
+        padding: 0;
+        margin: 0;
       }
-      th {
-        background: #eee;
+
+      .instance {
+        background: #222;
+        border: 2px solid #444;
+        border-radius: 10px;
+        padding: 10px;
+        gap: 15px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        height: 80px;
+        position: relative;
       }
-      .action-btn {
+
+      .instance-number {
+        color: #888;
+        font-family: monospace;
+        font-size: 48px;
+        width: 60px;
+        text-align: center;
+      }
+
+      .separator {
+        width: 2px;
+        background: #444;
+        border-radius: 1px;
+        align-self: stretch;
+      }
+
+      .spacer {
+        flex-grow: 1;
+      }
+
+      span[data-account] {
+        font-size: 40px;
+        font-weight: 350;
+      }
+
+      .other-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      span[data-status] {
+        font-size: 18px;
+        text-align: right;
+      }
+
+      span[data-port] {
+        font-size: 18px;
+        text-align: right;
+      }
+
+      .instance span {
+        white-space: nowrap;
+      }
+
+      .actions-btn {
+        margin-left: auto;
+        position: relative;
+      }
+
+      .actions-btn button {
         cursor: pointer;
-        margin-left: 5px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        font-size: 32px;
+        color: white;
+        width: 40px;
       }
-      .delete-btn {
-        color: red;
+
+      .context-menu {
+        display: none;
+        position: absolute;
+        top: 48px;
+        right: 0;
+        background: #333;
+        border: 1px solid #555;
+        border-radius: 5px;
+        min-width: 120px;
+        z-index: 10;
+      }
+
+      .context-menu span {
+        display: block;
+        padding: 6px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid #444;
+      }
+
+      .context-menu span:last-child {
+        border-bottom: none;
+      }
+
+      .context-menu span:hover {
+        background: #444;
+      }
+
+      .context-menu .delete-btn {
+        color: coral;
+      }
+
+      #addBtn {
+        font-size: 16px;
+        margin-top: 15px;
+        padding: 10px 15px;
+        border: none;
+        border-radius: 4px;
+        background: #007bff;
+        color: white;
+        cursor: pointer;
+      }
+
+      #addBtn:hover {
+        background: #0069d9;
       }
     </style>
+    <link rel="shortcut icon" href="static/favicon.ico" type="image/x-icon" />
   </head>
+
   <body>
     <h2>Zenith Proxy Manager</h2>
-    <table id="instances">
-      <thead>
-        <tr>
-          <th>Instance</th>
-          <th>Account</th>
-          <th>Status</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-    <button id="addBtn">Add Instance</button>
+    <ul id="instances"></ul>
+    <button id="addBtn">
+      <i class="mdi mdi-server-plus"></i> Add Instance
+    </button>
 
     <script>
+      const containerMap = new Map();
+
       async function fetchContainers() {
         const res = await fetch("/api/containers");
         const data = await res.json();
-        const tbody = document.querySelector("#instances tbody");
-        tbody.innerHTML = "";
+        const list = document.getElementById("instances");
+
+        data.sort((a, b) => a.instance - b.instance);
+
+        const names = new Set(data.map((c) => c.name));
+
+        for (const [name, el] of containerMap.entries()) {
+          if (!names.has(name)) {
+            el.remove();
+            containerMap.delete(name);
+          }
+        }
+
         data.forEach((c) => {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${c.instance}</td>
-            <td>${c.account}</td>
-            <td>${c.status}</td>
-            <td>
-                <span class="action-btn" onclick="start('${c.name}')">Start</span>
-                <span class="action-btn" onclick="stop('${c.name}')">Stop</span>
-                <span class="action-btn" onclick="restart('${c.name}')">Restart</span>
-                <span class="action-btn delete-btn" onclick="del('${c.name}')">Delete</span>
-            </td>`;
-          tbody.appendChild(tr);
+          if (containerMap.has(c.name)) {
+            const el = containerMap.get(c.name);
+            el.querySelector("[data-account]").textContent = c.account;
+            el.querySelector("[data-status]").innerHTML =
+              `${c.status} <i class="mdi mdi-information-box"></i>`;
+            el.querySelector("[data-port]").innerHTML =
+              `Port ${c.port} <i class="mdi mdi-server"></i>`;
+          } else {
+            const li = document.createElement("li");
+            li.className = "instance";
+
+            li.innerHTML = `
+            <h1 class="instance-number">${c.instance}</h1>
+            <div class="separator"></div>
+
+            <span data-account>${c.account}</span>
+            <div class="spacer"></div>
+
+            <div class="other-info">
+              <span data-status>${c.status} <i class="mdi mdi-information-box"></i></span>
+              <span data-port>
+                Port ${c.port}
+                <i class="mdi mdi-server"></i>
+              </span>
+            </div>
+            
+            <div class="actions-btn">
+              <button><i class="mdi mdi-dots-vertical"></i></button>
+              <div class="context-menu">
+                <span onclick="start('${c.name}')"><i class="mdi mdi-play"></i> Start</span>
+                <span onclick="stop('${c.name}')"><i class="mdi mdi-stop"></i> Stop</span>
+                <span onclick="restart('${c.name}')"><i class="mdi mdi-refresh"></i> Restart</span>
+                <span class="delete-btn" onclick="del('${c.name}')"><i class="mdi mdi-delete"></i> Delete</span>
+              </div>
+            </div>
+            `;
+
+            containerMap.set(c.name, li);
+            list.appendChild(li);
+
+            const btn = li.querySelector(".actions-btn button");
+            const menu = li.querySelector(".context-menu");
+
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              document.querySelectorAll(".context-menu").forEach((m) => {
+                if (m !== menu) m.style.display = "none";
+              });
+              menu.style.display =
+                menu.style.display === "block" ? "none" : "block";
+            });
+          }
+        });
+
+        data.forEach((c) => {
+          const el = containerMap.get(c.name);
+          if (el) list.appendChild(el);
         });
       }
 
       async function start(name) {
         await fetch(`/api/containers/${name}/start`, { method: "POST" });
       }
+
       async function stop(name) {
         await fetch(`/api/containers/${name}/stop`, { method: "POST" });
       }
+
       async function restart(name) {
         await fetch(`/api/containers/${name}/restart`, { method: "POST" });
       }
+
       async function del(name) {
         if (confirm(`Delete ${name}?`)) {
           await fetch(`/api/containers/${name}/delete`, { method: "POST" });
+          const el = containerMap.get(name);
+          if (el) {
+            el.remove();
+            containerMap.delete(name);
+          }
         }
       }
 
       document.getElementById("addBtn").onclick = async () => {
         await fetch("/api/containers/add", { method: "POST" });
       };
+
+      document.addEventListener("click", () => {
+        document.querySelectorAll(".context-menu").forEach((m) => {
+          m.style.display = "none";
+        });
+      });
 
       setInterval(fetchContainers, 1000);
       fetchContainers();

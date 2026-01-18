@@ -14,7 +14,8 @@ BLACK_BG = "\033[40m"
 app = Flask(__name__, static_folder="static")
 client = docker.from_env()
 
-ZENITH_IMAGE_PATH = "/root/Zenith/docker_image/zenith-proxy.tar"
+# ZENITH_IMAGE_PATH = "/root/Zenith/docker_image/zenith-proxy.tar"
+ZENITH_IMAGE_PATH = "docker_image/zenith-proxy.tar"
 ZENITH_IMAGE_NAME = "zenith-proxy:latest"
 
 # --- Docker image loading ---
@@ -29,18 +30,32 @@ load_zenith_image()
 
 # --- Helper functions ---
 def list_containers():
-    containers = client.containers.list(all=True, filters={"ancestor": ZENITH_IMAGE_NAME})
+    containers = client.containers.list(
+        all=True,
+        filters={"ancestor": ZENITH_IMAGE_NAME}
+    )
+
     result = []
+
     for i, c in enumerate(sorted(containers, key=lambda x: x.name)):
-        instance_number = int(c.name.replace("instance_", "")) if c.name.startswith("instance_") else i + 1
+        instance_number = int(c.name.replace("instance_", ""))
+
+        port = instance_to_port(instance_number)
+
         result.append({
             "id": c.id[:12],
             "name": c.name,
             "instance": instance_number,
-            "account": "",  # empty for now
-            "status": c.status
+            "account": "SomeMinecraftAcc",
+            "status": c.status.title(),
+            "port": port,
+            "url": f"http://localhost:{port}",
         })
+
     return sorted(result, key=lambda x: x["instance"])
+
+def instance_to_port(instance_number):
+    return 3000 + instance_number
 
 def get_next_instance_name():
     existing = [int(c["name"].replace("instance_", "")) for c in list_containers()]
@@ -71,6 +86,18 @@ def remove_container(name):
 
 def create_container(name):
     c = client.containers.create(ZENITH_IMAGE_NAME, name=name, detach=True)
+    return c.status
+
+def create_container(name):
+    instance_number = int(name.replace("instance_", ""))
+    port = instance_to_port(instance_number)
+
+    c = client.containers.create(
+        ZENITH_IMAGE_NAME,
+        name=name,
+        detach=True,
+        ports={"3000/tcp": port},
+    )
     return c.status
 
 # --- API routes ---

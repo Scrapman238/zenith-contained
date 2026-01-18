@@ -12,6 +12,7 @@ if [ ! -f "$FLAG" ]; then
 
     script -q -c "/root/launch" /dev/null <<EOF
 1
+y
 2
 3000
 n
