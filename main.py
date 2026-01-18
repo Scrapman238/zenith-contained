@@ -6,7 +6,7 @@ import os
 app = Flask(__name__)
 client = docker.from_env()
 
-ZENITH_IMAGE_PATH = "/root/docker_image/zenith-proxy.tar.gz"
+ZENITH_IMAGE_PATH = "/root/Zenith/docker_image/zenith-proxy.tar.gz"
 ZENITH_IMAGE_NAME = "zenith-proxy:latest"
 
 # Load image on startup if not present

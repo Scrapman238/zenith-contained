@@ -26,10 +26,13 @@ fi
 
 docker --version
 
+mkdir -p /root/Zenith/
+cd /root/Zenith/
+
 # --- Python virtual environment ---
 if [ ! -d ".venv" ]; then
     echo "Creating Python virtual environment..."
-    python3 -m venv .venv
+    python3 -m venv /root/Zenith/.venv
 else
     echo "Python virtual environment already exists. Skipping..."
 fi
@@ -44,7 +47,7 @@ if [ -d "zenith-contained" ]; then
 else
     echo "Cloning project repository..."
     git clone "$REPO_URL" "$TMP_DIR"
-    rsync -a --ignore-existing "$TMP_DIR/" /root/
+    rsync -a --ignore-existing "$TMP_DIR/" /root/Zenith/
     rm -rf "$TMP_DIR"
 fi
 
