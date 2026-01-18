@@ -1,16 +1,15 @@
-import requests
-from flask import Flask
 from waitress import serve
+from flask import Flask
+import requests
 import qrcode
+import os
 
-# ANSI colors
 RESET = "\033[0m"
 WHITE_FG = "\033[37m"
 WHITE_BG = "\033[47m"
 BLACK_FG = "\033[30m"
 BLACK_BG = "\033[40m"
 
-# Flask app
 app = Flask(__name__)
 
 @app.route("/")
@@ -29,19 +28,17 @@ def print_qr_ascii(data):
     qr = qrcode.QRCode(border=2)
     qr.add_data(data)
     qr.make(fit=True)
-    matrix = qr.get_matrix()  # True = black, False = white
+    matrix = qr.get_matrix()
 
-    # Pad if odd number of rows
     if len(matrix) % 2 != 0:
         matrix.append([False]*len(matrix[0]))
 
     for y in range(0, len(matrix), 2):
         line = ""
         for x in range(len(matrix[0])):
-            upper = matrix[y][x]      # top pixel
-            lower = matrix[y+1][x]    # bottom pixel
+            upper = matrix[y][x]
+            lower = matrix[y+1][x]
 
-            # Use built-in colors
             fg = WHITE_FG if upper else BLACK_FG
             bg = WHITE_BG if lower else BLACK_BG
 
@@ -54,6 +51,7 @@ if __name__ == "__main__":
         print("Could not determine public IP.")
         exit(1)
 
+    os.system("clear")
     print("########################")
     print("# Zenith Manager Setup #")
     print("########################")

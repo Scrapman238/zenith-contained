@@ -53,6 +53,4 @@ echo "Installing Python dependencies..."
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
 
-# --- Run application ---
-echo "Running the application..."
 .venv/bin/python3 main.py
