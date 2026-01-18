@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Zenith Proxy Manager</title>
+    <style>
+      table {
+        border-collapse: collapse;
+        width: 80%;
+        margin: 20px auto;
+      }
+      th,
+      td {
+        border: 1px solid #ccc;
+        padding: 8px;
+        text-align: center;
+      }
+      button {
+        padding: 5px 10px;
+        margin: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 style="text-align: center">Zenith Proxy Manager</h1>
+
+    <div style="text-align: center; margin-bottom: 10px">
+      <input type="text" id="new-name" placeholder="New container name" />
+      <button onclick="createContainer()">Create New</button>
+      <button onclick="refresh()">Refresh</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="container-list">
+        {% for c in containers %}
+        <tr id="container-{{ c.name }}">
+          <td>{{ c.name }}</td>
+          <td>{{ c.status }}</td>
+          <td>
+            <button onclick="start('{{ c.name }}')">Start</button>
+            <button onclick="stop('{{ c.name }}')">Stop</button>
+            <button onclick="restart('{{ c.name }}')">Restart</button>
+            <button onclick="deleteContainer('{{ c.name }}')">Delete</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <script src="/static/script.js"></script>
+  </body>
+</html>
