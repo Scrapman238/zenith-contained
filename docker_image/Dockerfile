@@ -1,19 +1,19 @@
 FROM ubuntu:22.04
 
-RUN apt update && \
-    apt install -y \
-    python3 python3-pip python3-venv \
-    unzip wget curl bash ca-certificates \
-    rsync git git-lfs docker.io docker-compose && \
-    git lfs install && \
+RUN \
+    apt update && \
+    apt install -y python3 python3-pip python3-venv \
+    unzip wget curl bash ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-RUN wget -O /root/ZenithProxy-launcher-linux-amd64.zip \
+RUN \
+    wget -O /root/ZenithProxy-launcher-linux-amd64.zip \
     https://github.com/rfresh2/ZenithProxy/releases/download/launcher-v3/ZenithProxy-launcher-linux-amd64.zip && \
     unzip -o /root/ZenithProxy-launcher-linux-amd64.zip -d /root/ && \
     rm -f /root/ZenithProxy-launcher-linux-amd64.zip
 
 COPY run.sh /root/run.sh
+
 RUN chmod +x /root/run.sh
 
 EXPOSE 8080

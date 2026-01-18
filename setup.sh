@@ -6,6 +6,15 @@ cd /root
 echo "Updating package index..."
 sudo apt update -y
 
+echo "Installing prerequisites..."
+sudo apt install -y \
+    ca-certificates \
+    curl \
+    git \
+    python3-venv \
+    rsync \
+    wget
+
 # --- Install Git LFS ---
 if ! command -v git-lfs >/dev/null 2>&1; then
     echo "Installing Git LFS..."
@@ -31,7 +40,6 @@ docker --version
 mkdir -p /root/Zenith/
 cd /root/Zenith/
 
-# --- Python virtual environment ---
 if [ ! -d ".venv" ]; then
     echo "Creating Python virtual environment..."
     python3 -m venv /root/Zenith/.venv
@@ -57,6 +65,16 @@ else
     rsync -a --ignore-existing "$TMP_DIR/" /root/Zenith/
     cd /root/Zenith/
     rm -rf "$TMP_DIR"
+fi
+
+ZENITH_TAR="/root/Zenith/docker_image/zenith-proxy.tar"
+
+if [ -f "$ZENITH_TAR" ]; then
+    echo "Loading Zenith Docker image..."
+    docker load -i "$ZENITH_TAR"
+else
+    echo "ERROR: Docker image not found at $ZENITH_TAR"
+    exit 1
 fi
 
 # --- Python dependencies ---
