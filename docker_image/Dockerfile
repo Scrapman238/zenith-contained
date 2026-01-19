@@ -17,8 +17,11 @@ RUN wget -O /root/ZenithProxy-launcher-linux-amd64.zip \
     chmod +x /root/launch
 
 RUN mkdir -p /root/plugins && \
+    mkdir -p /root/plugins/config && \
     curl -L -o /root/plugins/ZenithProxyWebAPI-1.0.5.jar \
     https://github.com/rfresh2/ZenithProxyWebAPI/releases/download/1.0.5/ZenithProxyWebAPI-1.0.5.jar
+
+COPY web-api.json /root/plugins/config/web-api.json
 
 COPY run.sh /root/run.sh
 RUN chmod +x /root/run.sh

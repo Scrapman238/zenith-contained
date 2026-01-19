@@ -219,7 +219,7 @@ def api_status(name):
         return jsonify({
             "status": "success",
             "response_code": response.status_code,
-            "response_body": parse_zenith_status(response.json()["embed"]) if response.content else {}
+            "response_body": parse_zenith_status(response.json().get("embed", "")) if response.content else {}
         })
     except requests.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
