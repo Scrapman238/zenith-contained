@@ -6,6 +6,7 @@ import requests
 import qrcode
 import docker
 import os
+import re
 
 def verify_root_password(password: str) -> bool:
     try:
@@ -28,6 +29,41 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
+def parse_zenith_status(text: str) -> dict:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    result = {}
+
+    header = lines.pop(0)
+    m = re.match(r"ZenithProxy\s+(.+?)\s+-\s+(.+)", header)
+    if m:
+        result["Version"] = m.group(1)
+        result["Account"] = m.group(2)
+
+    i = 0
+    while i < len(lines):
+        key = lines[i]
+
+        if key == "2b2t Queue":
+            result[key] = {
+                "Priority": lines[i + 1].split(":", 1)[1].strip(),
+                "Regular": lines[i + 2].split(":", 1)[1].strip(),
+            }
+            i += 3
+            continue
+
+        if key == "Coordinates":
+            result[key] = lines[i + 1]
+            i += 2
+            continue
+
+        if i + 1 < len(lines):
+            result[key] = lines[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    return result
+
 RESET = "\033[0m"
 WHITE_FG = "\033[37m"
 WHITE_BG = "\033[47m"
@@ -37,6 +73,8 @@ BLACK_BG = "\033[40m"
 app = Flask(__name__, static_folder="static")
 app.secret_key = os.urandom(32)
 client = docker.from_env()
+
+ports_per_instance = 2
 
 # ZENITH_IMAGE_PATH = "/root/Zenith/docker_image/zenith-proxy.tar"
 ZENITH_IMAGE_PATH = "docker_image/zenith-proxy.tar"
@@ -64,13 +102,12 @@ def list_containers():
     for i, c in enumerate(sorted(containers, key=lambda x: x.name)):
         instance_number = int(c.name.replace("instance_", ""))
 
-        port = instance_to_port(instance_number)
+        port = instance_to_port(instance_number, ports_per_instance)
 
         result.append({
             "id": c.id[:12],
             "name": c.name,
             "instance": instance_number,
-            "account": "SomeMinecraftAcc",
             "status": c.status.title(),
             "port": port,
             "url": f"http://localhost:{port}",
@@ -78,8 +115,9 @@ def list_containers():
 
     return sorted(result, key=lambda x: x["instance"])
 
-def instance_to_port(instance_number):
-    return 3000 + instance_number
+def instance_to_port(instance_number, ports_per_instance=1):
+    BASE_PORT = 9000
+    return BASE_PORT + (instance_number - 1) * ports_per_instance
 
 def get_next_instance_name():
     existing = [int(c["name"].replace("instance_", "")) for c in list_containers()]
@@ -109,18 +147,17 @@ def remove_container(name):
     return True
 
 def create_container(name):
-    c = client.containers.create(ZENITH_IMAGE_NAME, name=name, detach=True)
-    return c.status
-
-def create_container(name):
     instance_number = int(name.replace("instance_", ""))
-    port = instance_to_port(instance_number)
+    port = instance_to_port(instance_number, ports_per_instance)
 
     c = client.containers.create(
         ZENITH_IMAGE_NAME,
         name=name,
         detach=True,
-        ports={"3000/tcp": port},
+        ports={
+            "8080/tcp": port,
+            "8081/tcp": port + 1,
+        },
     )
     return c.status
 
@@ -158,6 +195,70 @@ def api_delete(name):
     remove_container(name)
     return jsonify({"status": "deleted"})
 
+@app.route("/api/containers/<name>/zenith-status", methods=["GET"])
+@login_required
+def api_status(name):
+    try:
+        instance_number = int(name.replace("instance_", ""))
+    except ValueError:
+        return jsonify({"error": "Invalid container name"}), 400
+
+    port = instance_to_port(instance_number, ports_per_instance)
+    url = f"http://localhost:{port}/command"
+
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "Authorization": "zenith",
+                "Content-Type": "application/json"
+            },
+            json={"command": "status"},
+            timeout=3
+        )
+        return jsonify({
+            "status": "success",
+            "response_code": response.status_code,
+            "response_body": parse_zenith_status(response.json()["embed"]) if response.content else {}
+        })
+    except requests.RequestException as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/containers/<name>/send_command", methods=["POST"])
+@login_required
+def api_send_command(name):
+    data = request.get_json()
+    if not data or "command" not in data:
+        return jsonify({"error": "Missing 'command' in request body"}), 400
+
+    command = data["command"]
+
+    try:
+        instance_number = int(name.replace("instance_", ""))
+    except ValueError:
+        return jsonify({"error": "Invalid container name"}), 400
+
+    port = instance_to_port(instance_number, ports_per_instance)
+    url = f"http://localhost:{port}/command"
+
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "Authorization": "zenith",
+                "Content-Type": "application/json"
+            },
+            json={"command": command},
+            timeout=3
+        )
+        return jsonify({
+            "status": "success",
+            "response_code": response.status_code,
+            "response_body": response.json() if response.content else {}
+        })
+    except requests.RequestException as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route("/")
 @login_required
 def index():
@@ -194,6 +295,48 @@ def logout():
 @login_required
 def static_files(path):
     return send_from_directory("static", path)
+
+@app.route("/api/containers/<name>/code", methods=["GET"])
+@login_required
+def api_get_code(name):
+    try:
+        instance_number = int(name.replace("instance_", ""))
+    except ValueError:
+        return jsonify({"error": "Invalid container name"}), 400
+
+    port = instance_to_port(instance_number, ports_per_instance) + 1
+    url = f"http://localhost:{port}/code"
+
+    try:
+        r = requests.get(url, timeout=2)
+        r.raise_for_status()
+        return jsonify(r.json())
+    except requests.RequestException as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route("/api/containers/<name>/logout", methods=["POST"])
+@login_required
+def api_container_logout(name):
+    try:
+        instance_number = int(name.replace("instance_", ""))
+    except ValueError:
+        return jsonify({"error": "Invalid container name"}), 400
+
+    port = instance_to_port(instance_number, ports_per_instance) + 1
+    url = f"http://localhost:{port}/logout"
+
+    try:
+        r = requests.post(url, timeout=5)
+        r.raise_for_status()
+        return jsonify(r.json())
+    except requests.RequestException as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 def get_public_ip():
     try:

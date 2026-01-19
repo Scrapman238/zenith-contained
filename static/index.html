@@ -12,6 +12,7 @@
 
     <style>
       body {
+        min-width: 750px;
         font-family: sans-serif;
         padding: 20px;
         background: #111;
@@ -47,6 +48,11 @@
         font-size: 48px;
         width: 60px;
         text-align: center;
+        transition: color 0.1s ease-in-out;
+        user-select: none;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
       }
 
       .separator {
@@ -156,8 +162,29 @@
       <i class="mdi mdi-server-plus"></i> Add Instance
     </button>
 
+    <div id="command-section" style="margin-top: 20px">
+      <input
+        type="text"
+        id="commandInput"
+        placeholder="Enter command for instance(s) and press Enter"
+        style="
+          padding: 8px;
+          width: 300px;
+          border-radius: 4px;
+          border: 1px solid #555;
+          background: #222;
+          color: white;
+        "
+      />
+      <div
+        id="commandResponse"
+        style="margin-top: 10px; white-space: pre-wrap; font-family: monospace"
+      ></div>
+    </div>
+
     <script>
       const containerMap = new Map();
+      const selectedInstances = new Set();
 
       async function fetchContainers() {
         const res = await fetch("/api/containers");
@@ -168,10 +195,12 @@
 
         const names = new Set(data.map((c) => c.name));
 
+        // Remove deleted containers from DOM
         for (const [name, el] of containerMap.entries()) {
           if (!names.has(name)) {
             el.remove();
             containerMap.delete(name);
+            selectedInstances.delete(name); // remove from selection
           }
         }
 
@@ -188,30 +217,30 @@
             li.className = "instance";
 
             li.innerHTML = `
-            <h1 class="instance-number">${c.instance}</h1>
-            <div class="separator"></div>
+        <h1 class="instance-number">${c.instance}</h1>
+        <div class="separator"></div>
 
-            <span data-account>${c.account}</span>
-            <div class="spacer"></div>
+        <span data-account>${c.account}</span>
+        <div class="spacer"></div>
 
-            <div class="other-info">
-              <span data-status>${c.status} <i class="mdi mdi-information-box"></i></span>
-              <span data-port>
-                Port ${c.port}
-                <i class="mdi mdi-server"></i>
-              </span>
-            </div>
-            
-            <div class="actions-btn">
-              <button><i class="mdi mdi-dots-vertical"></i></button>
-              <div class="context-menu">
-                <span onclick="start('${c.name}')"><i class="mdi mdi-play"></i> Start</span>
-                <span onclick="stop('${c.name}')"><i class="mdi mdi-stop"></i> Stop</span>
-                <span onclick="restart('${c.name}')"><i class="mdi mdi-refresh"></i> Restart</span>
-                <span class="delete-btn" onclick="del('${c.name}')"><i class="mdi mdi-delete"></i> Delete</span>
-              </div>
-            </div>
-            `;
+        <div class="other-info">
+          <span data-status>${c.status} <i class="mdi mdi-information-box"></i></span>
+          <span data-port>
+            Port ${c.port}
+            <i class="mdi mdi-server"></i>
+          </span>
+        </div>
+        
+        <div class="actions-btn">
+          <button><i class="mdi mdi-dots-vertical"></i></button>
+          <div class="context-menu">
+            <span onclick="start('${c.name}')"><i class="mdi mdi-play"></i> Start</span>
+            <span onclick="stop('${c.name}')"><i class="mdi mdi-stop"></i> Stop</span>
+            <span onclick="restart('${c.name}')"><i class="mdi mdi-refresh"></i> Restart</span>
+            <span class="delete-btn" onclick="del('${c.name}')"><i class="mdi mdi-delete"></i> Delete</span>
+          </div>
+        </div>
+        `;
 
             containerMap.set(c.name, li);
             list.appendChild(li);
@@ -230,6 +259,29 @@
           }
         });
 
+        // Add click handlers for instance number selection
+        data.forEach((c) => {
+          const el = containerMap.get(c.name);
+          if (!el) return;
+
+          const instanceNumberEl = el.querySelector(".instance-number");
+          instanceNumberEl.style.cursor = "pointer";
+          instanceNumberEl.style.color = selectedInstances.has(c.name)
+            ? "#29e026"
+            : "#888";
+
+          instanceNumberEl.onclick = () => {
+            if (selectedInstances.has(c.name)) {
+              selectedInstances.delete(c.name);
+              instanceNumberEl.style.color = "#888";
+            } else {
+              selectedInstances.add(c.name);
+              instanceNumberEl.style.color = "#29e026";
+            }
+          };
+        });
+
+        // Ensure ordering in DOM
         data.forEach((c) => {
           const el = containerMap.get(c.name);
           if (el) list.appendChild(el);
@@ -255,9 +307,58 @@
           if (el) {
             el.remove();
             containerMap.delete(name);
+            selectedInstances.delete(name);
           }
         }
       }
+
+      // Command input: send to all selected instances on Enter
+      document
+        .getElementById("commandInput")
+        .addEventListener("keydown", async (e) => {
+          if (e.key !== "Enter") return;
+
+          const commandInput = e.target;
+          const responseDiv = document.getElementById("commandResponse");
+          const command = commandInput.value.trim();
+
+          if (!command) return;
+
+          if (selectedInstances.size === 0) {
+            responseDiv.textContent = "No instances selected!";
+            return;
+          }
+
+          responseDiv.textContent = "Sending command...";
+          commandInput.value = "";
+
+          const results = [];
+          for (const name of selectedInstances) {
+            try {
+              const res = await fetch(`/api/containers/${name}/send_command`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ command }),
+              });
+
+              const data = await res.json();
+
+              if (res.ok) {
+                results.push(
+                  `${name} → ${JSON.stringify(data.response_body, null, 2)}`,
+                );
+              } else {
+                results.push(
+                  `${name} → ERROR: ${data.message || JSON.stringify(data)}`,
+                );
+              }
+            } catch (err) {
+              results.push(`${name} → Request failed: ${err.message}`);
+            }
+          }
+
+          responseDiv.textContent = results.join("\n\n");
+        });
 
       document.getElementById("addBtn").onclick = async () => {
         await fetch("/api/containers/add", { method: "POST" });
