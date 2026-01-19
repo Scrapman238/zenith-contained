@@ -1,10 +1,45 @@
-const containerMap = new Map();
-const selectedInstances = new Set();
-const connectSent = new Map(); // Track if "connect" command was sent
-const codeIntervals = new Map(); // Track code polling intervals
-const statusIntervals = new Map(); // Track status polling intervals
+const containerMap = new Map(); // name -> DOM element
+const containerStatusMap = new Map(); // name -> latest c.status
+const selectedInstances = new Set(); // selected instances
+const connectSent = new Map(); // track if "connect" was sent
+const codeIntervals = new Map(); // track code polling intervals
+const statusIntervals = new Map(); // track status polling intervals
 
-// Cookie utilities
+function updateConnectCursor(span) {
+  if (span.textContent.trim() === "Connect") {
+    span.style.cursor = "pointer";
+  } else {
+    span.style.cursor = "";
+  }
+}
+
+document.querySelectorAll("span[data-account]").forEach(updateConnectCursor);
+
+const observer = new MutationObserver((mutationsList) => {
+  for (const mutation of mutationsList) {
+    if (mutation.type === "characterData") {
+      updateConnectCursor(mutation.target.parentNode);
+    }
+    if (mutation.type === "childList") {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType === 1 && node.matches("span[data-account]")) {
+          updateConnectCursor(node);
+        }
+        node
+          .querySelectorAll?.("span[data-account]")
+          .forEach(updateConnectCursor);
+      });
+    }
+  }
+});
+
+observer.observe(document.body, {
+  childList: true,
+  subtree: true,
+  characterData: true,
+});
+
+// ---- Cookie utilities ----
 function setCookie(name, value, days) {
   const d = new Date();
   d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
@@ -22,19 +57,27 @@ function getCookie(name) {
   return v ? decodeURIComponent(v[2]) : null;
 }
 
+// ---- Fetch container list ----
 async function fetchContainers() {
   const res = await fetch("/api/containers");
+  if (!res.ok) return;
   const data = await res.json();
   const list = document.getElementById("instances");
 
   data.sort((a, b) => a.instance - b.instance);
   const names = new Set(data.map((c) => c.name));
 
+  // Remember focused element
+  const activeEl = document.activeElement;
+  const selectionStart = activeEl?.selectionStart;
+  const selectionEnd = activeEl?.selectionEnd;
+
   // Remove deleted containers
   for (const [name, el] of containerMap.entries()) {
     if (!names.has(name)) {
       el.remove();
       containerMap.delete(name);
+      containerStatusMap.delete(name);
       selectedInstances.delete(name);
       if (codeIntervals.has(name)) {
         clearInterval(codeIntervals.get(name));
@@ -47,44 +90,73 @@ async function fetchContainers() {
     }
   }
 
+  // Update or create containers
   data.forEach((c) => {
+    containerStatusMap.set(c.name, c.status);
+
     if (containerMap.has(c.name)) {
-      updateInstanceUI(c);
+      updateInstanceUI(c); // safe update
     } else {
-      createInstanceUI(c);
+      createInstanceUI(c); // only create new elements
     }
   });
 
-  // Reorder in DOM
+  // Reorder DOM without destroying focus
   data.forEach((c) => {
     const el = containerMap.get(c.name);
-    if (el) list.appendChild(el);
+    if (el && el.parentNode !== list) {
+      list.appendChild(el);
+    }
   });
+
+  // Restore focus
+  if (activeEl && selectionStart != null && selectionEnd != null) {
+    activeEl.focus();
+    activeEl.setSelectionRange(selectionStart, selectionEnd);
+  }
 }
 
+// ---- Create container DOM ----
 function createInstanceUI(c) {
   const li = document.createElement("li");
   li.className = "instance";
 
+  // Determine initial account display
+  const lastUser = getCookie(`container_${c.name}_user`);
+  const accountText =
+    c.status === "Running"
+      ? "Loading..." // will poll zenith-status
+      : lastUser || "Unknown"; // container offline
+
   li.innerHTML = `
+    <div class="top">
         <h1 class="instance-number">${c.instance}</h1>
         <div class="separator"></div>
-        <span data-account>Loading...</span>
+            <span data-account>${accountText}</span>
         <div class="spacer"></div>
         <div class="other-info">
-        <span data-status>${c.status} <i class="mdi mdi-information-box"></i></span>
-        <span data-port>Port ${c.port} <i class="mdi mdi-server"></i></span>
+            <span data-status>${c.status} <i class="mdi mdi-information-box"></i></span>
+            <span data-port>Port ${c.port} <i class="mdi mdi-server"></i></span>
         </div>
         <div class="actions-btn">
-        <button><i class="mdi mdi-dots-vertical"></i></button>
-        <div class="context-menu">
-            <span onclick="start('${c.name}')"><i class="mdi mdi-play"></i> Start</span>
-            <span onclick="stop('${c.name}')"><i class="mdi mdi-stop"></i> Stop</span>
-            <span onclick="restart('${c.name}')"><i class="mdi mdi-refresh"></i> Restart</span>
-            <span class="delete-btn" onclick="del('${c.name}')"><i class="mdi mdi-delete"></i> Delete</span>
+            <button><i class="mdi mdi-dots-vertical"></i></button>
+            <div class="context-menu">
+                <span onclick="start('${c.name}')"><i class="mdi mdi-play"></i> Start</span>
+                <span onclick="stop('${c.name}')"><i class="mdi mdi-stop"></i> Stop</span>
+                <span onclick="restart('${c.name}')"><i class="mdi mdi-refresh"></i> Restart</span>
+                <span class="delete-btn" onclick="del('${c.name}')"><i class="mdi mdi-delete"></i> Delete</span>
+            </div>
         </div>
-        </div>
-    `;
+    </div>
+    <div class="bottom">
+        <form action="/api/containers/${c.name}/update-discord" method="POST">
+            <input type="text" id="token" name="token" placeholder="Bot Token">
+            <input type="text" id="channel" name="channel" placeholder="Channel ID">
+            <input type="text" id="role" name="role" placeholder="Role ID">
+            <button type="submit">Update</button>
+        </form>
+    </div>
+  `;
 
   containerMap.set(c.name, li);
   document.getElementById("instances").appendChild(li);
@@ -116,69 +188,94 @@ function createInstanceUI(c) {
     }
   };
 
-  startStatusPolling(c.name, c.status);
+  startStatusPolling(c.name); // start polling for this container
 }
 
+// ---- Update existing container UI ----
 function updateInstanceUI(c) {
   const el = containerMap.get(c.name);
   if (!el) return;
-  el.querySelector("[data-status]").innerHTML =
-    `${c.status} <i class="mdi mdi-information-box"></i>`;
-  el.querySelector("[data-port]").innerHTML =
-    `Port ${c.port} <i class="mdi mdi-server"></i>`;
+
+  const statusEl = el.querySelector("[data-status]");
+  const portEl = el.querySelector("[data-port]");
+
+  // Update text without replacing icons
+  statusEl.childNodes[0].textContent = c.status + " ";
+  portEl.childNodes[0].textContent = "Port " + c.port + " ";
 }
 
-function startStatusPolling(name, initialStatus) {
+// ---- Poll container status ----
+function startStatusPolling(name) {
   if (statusIntervals.has(name)) return;
   const el = containerMap.get(name);
   const accountSpan = el.querySelector("[data-account]");
 
   async function pollStatus() {
+    // Remember currently focused input and cursor
+    const activeEl = document.activeElement;
+    const selectionStart = activeEl?.selectionStart;
+    const selectionEnd = activeEl?.selectionEnd;
+
     try {
-      const res = await fetch(`/api/containers/${name}/zenith-status`);
+      const currentStatus = containerStatusMap.get(name);
+      const lastUser = getCookie(`container_${name}_user`);
 
-      if (!res.ok) {
-        // Container offline / not started
-        const lastUser = getCookie(`container_${name}_user`);
+      if (currentStatus !== "Running") {
         accountSpan.textContent = lastUser || "Unknown";
-        return; // skip all further logic
-      }
-
-      const data = await res.json();
-      const account = data?.response_body?.Account || "Unknown";
-      const status = data?.response_body?.Status || initialStatus || "Offline";
-
-      if (status !== "Running") {
-        // container is offline
-        const lastUser = getCookie(`container_${name}_user`);
-        accountSpan.textContent = lastUser || "Unknown";
-        return;
-      }
-
-      // container is online
-      if (account && account !== "Unknown") {
-        accountSpan.textContent = account;
-        setCookie(`container_${name}_user`, account, 7);
+        accountSpan.onclick = null;
 
         if (codeIntervals.has(name)) {
           clearInterval(codeIntervals.get(name));
           codeIntervals.delete(name);
         }
       } else {
-        if (!connectSent.get(name)) {
-          accountSpan.textContent = "Connect";
-          accountSpan.onclick = async () => {
-            await sendCommand(name, "connect");
-            connectSent.set(name, true);
-            startCodePolling(name);
-            accountSpan.textContent = "Loading...";
-          };
+        // Container is running → check zenith-status
+        const res = await fetch(`/api/containers/${name}/zenith-status`);
+        if (!res.ok) {
+          accountSpan.textContent = lastUser || "Unknown";
+          accountSpan.onclick = null;
+          return;
+        }
+
+        const data = await res.json();
+        const account = data?.response_body?.Account || "Unknown";
+        accountSpan.onclick = null;
+
+        if (account !== "Unknown") {
+          accountSpan.textContent = account;
+          setCookie(`container_${name}_user`, account, 7);
+
+          if (codeIntervals.has(name)) {
+            clearInterval(codeIntervals.get(name));
+            codeIntervals.delete(name);
+          }
+        } else {
+          // Show Connect if not already sent
+          if (!connectSent.get(name)) {
+            accountSpan.textContent = "Connect";
+            accountSpan.onclick = async () => {
+              await sendCommand(name, "connect");
+              connectSent.set(name, true);
+              startCodePolling(name);
+              accountSpan.textContent = "Loading...";
+            };
+          }
         }
       }
     } catch (err) {
-      // network or parsing error → container likely offline
       const lastUser = getCookie(`container_${name}_user`);
       accountSpan.textContent = lastUser || "Unknown";
+    }
+
+    // Restore focus and cursor if typing in input
+    if (
+      activeEl &&
+      activeEl.tagName === "INPUT" &&
+      selectionStart != null &&
+      selectionEnd != null
+    ) {
+      activeEl.focus();
+      activeEl.setSelectionRange(selectionStart, selectionEnd);
     }
   }
 
@@ -187,6 +284,7 @@ function startStatusPolling(name, initialStatus) {
   statusIntervals.set(name, interval);
 }
 
+// ---- Poll code after connect ----
 function startCodePolling(name) {
   if (codeIntervals.has(name)) return;
   const el = containerMap.get(name);
@@ -200,7 +298,9 @@ function startCodePolling(name) {
 
       if (!code) {
         accountSpan.textContent = "Loading...";
+        accountSpan.onclick = null;
       } else {
+        accountSpan.onclick = null;
         accountSpan.innerHTML = `<a href="https://www.microsoft.com/link?otc=${code}" target="_blank">${code}</a>`;
         clearInterval(codeIntervals.get(name));
         codeIntervals.delete(name);
@@ -215,6 +315,7 @@ function startCodePolling(name) {
   codeIntervals.set(name, interval);
 }
 
+// ---- Send command ----
 async function sendCommand(name, command) {
   try {
     await fetch(`/api/containers/${name}/send_command`, {
@@ -227,6 +328,7 @@ async function sendCommand(name, command) {
   }
 }
 
+// ---- Start / Stop / Restart / Delete ----
 async function start(name) {
   await fetch(`/api/containers/${name}/start`, { method: "POST" });
 }
@@ -244,28 +346,31 @@ async function del(name) {
     if (el) {
       el.remove();
       containerMap.delete(name);
+      containerStatusMap.delete(name);
       selectedInstances.delete(name);
       if (codeIntervals.has(name)) clearInterval(codeIntervals.get(name));
       if (statusIntervals.has(name)) clearInterval(statusIntervals.get(name));
+
+      setCookie(`container_${name}_user`, "", -1);
     }
   }
 }
 
-// Command input
-document
-  .getElementById("commandInput")
-  .addEventListener("keydown", async (e) => {
+// ---- Command input ----
+const commandInput = document.getElementById("commandInput");
+if (commandInput) {
+  commandInput.addEventListener("keydown", async (e) => {
     if (e.key !== "Enter") return;
-    const commandInput = e.target;
-    const responseDiv = document.getElementById("commandResponse");
-    const command = commandInput.value.trim();
+    const command = e.target.value.trim();
     if (!command) return;
+    const responseDiv = document.getElementById("commandResponse");
     if (selectedInstances.size === 0) {
       responseDiv.textContent = "No instances selected!";
       return;
     }
     responseDiv.textContent = "Sending command...";
-    commandInput.value = "";
+    e.target.value = "";
+
     const results = [];
     for (const name of selectedInstances) {
       try {
@@ -275,31 +380,37 @@ document
           body: JSON.stringify({ command }),
         });
         const data = await res.json();
-        if (res.ok) {
+        if (res.ok)
           results.push(
             `${name} → ${JSON.stringify(data.response_body, null, 2)}`,
           );
-        } else {
+        else
           results.push(
             `${name} → ERROR: ${data.message || JSON.stringify(data)}`,
           );
-        }
       } catch (err) {
         results.push(`${name} → Request failed: ${err.message}`);
       }
     }
     responseDiv.textContent = results.join("\n\n");
   });
+}
 
-document.getElementById("addBtn").onclick = async () => {
-  await fetch("/api/containers/add", { method: "POST" });
-};
+// ---- Add container button ----
+const addBtn = document.getElementById("addBtn");
+if (addBtn) {
+  addBtn.onclick = async () => {
+    await fetch("/api/containers/add", { method: "POST" });
+  };
+}
 
+// ---- Hide context menus ----
 document.addEventListener("click", () => {
-  document.querySelectorAll(".context-menu").forEach((m) => {
-    m.style.display = "none";
-  });
+  document
+    .querySelectorAll(".context-menu")
+    .forEach((m) => (m.style.display = "none"));
 });
 
+// ---- Start polling containers ----
 setInterval(fetchContainers, 1000);
 fetchContainers();

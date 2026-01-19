@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from flask import Flask, jsonify
+from flask import Flask, request, jsonify
 from waitress import serve
 import subprocess
 import threading
@@ -30,6 +30,30 @@ def logout():
         "dc": dc_result,
         "auth_clear": auth_clear_result
     })
+
+@app.route("/update-discord", methods=["POST"])
+def container_update_discord():
+    token = request.form.get("token")
+    channel = request.form.get("channel")
+    role = request.form.get("role")
+
+    print(f"[Container] Received update-discord data:")
+    print(f"  token: {token}")
+    print(f"  channel: {channel}")
+    print(f"  role: {role}")
+    
+    if token.strip():
+        send_command(f"discord token {token.strip()}")
+        
+    if channel.strip():
+        send_command(f"discord channel {channel.strip()}")
+        
+    if role.strip():
+        send_command(f"discord role {role.strip()}")
+        
+    send_command("discord on")
+
+    return jsonify({"status": "ok"})
 
 # ------------------------
 # Zenith command sender (unchanged)

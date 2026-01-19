@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, send_from_directory, session, redirect, url_for
+from flask import Flask, jsonify, request, send_from_directory, session, redirect
 from functools import wraps
 from waitress import serve
 import subprocess
@@ -194,6 +194,26 @@ def api_restart(name):
 def api_delete(name):
     remove_container(name)
     return jsonify({"status": "deleted"})
+
+@app.route("/api/containers/<name>/update-discord", methods=["POST"])
+@login_required
+def update_discord(name):
+    try:
+        instance_number = int(name.replace("instance_", ""))
+    except ValueError:
+        return jsonify({"error": "Invalid container name"}), 400
+
+    port = instance_to_port(instance_number, ports_per_instance) + 1
+    url = f"http://localhost:{port}/update-discord"
+
+    try:
+        response = requests.post(url, data=request.form)
+        if response.status_code != 200:
+            print(f"[WARN] Container responded with {response.status_code}")
+    except requests.RequestException as e:
+        print(f"[ERROR] Could not reach container: {e}")
+
+    return redirect("/")
 
 @app.route("/api/containers/<name>/zenith-status", methods=["GET"])
 @login_required
