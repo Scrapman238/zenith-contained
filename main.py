@@ -222,7 +222,7 @@ def create_container(name):
     else:
         outbound_ip = EXTRA_IPS[instance_number - 2]
 
-    port = instance_to_port(9000, instance_number, ports_per_instance)
+    port = instance_to_port(8080, instance_number, ports_per_instance)
     proxy_port = instance_to_port(6000, instance_number, 1)
 
     c = client.containers.create(
@@ -509,8 +509,8 @@ if __name__ == "__main__":
     print("########################")
     print("# Zenith Manager Setup #")
     print("########################")
-    print(f"Open for setup: http://{public_ip}:8080/\n")
+    print(f"Open for setup: http://{public_ip}:8000/\n")
     if public_ip != "0.0.0.0":
-        print_qr_ascii(f"http://{public_ip}:8080/")
+        print_qr_ascii(f"http://{public_ip}:8000/")
 
-    serve(app, host="0.0.0.0", port=8080)
+    serve(app, host="0.0.0.0", port=8000)
