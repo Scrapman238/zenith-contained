@@ -9,40 +9,45 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-# Check if PermitRootLogin yes exists (ignoring comments and spaces)
-grep -qE '^[[:space:]]*PermitRootLogin[[:space:]]+yes' "$SSHD_CONFIG" && permit_root_set=true || permit_root_set=false
-grep -qE '^[[:space:]]*PasswordAuthentication[[:space:]]+yes' "$SSHD_CONFIG" && password_auth_set=true || password_auth_set=false
+# Function to check if a setting exists (ignoring comments and spaces)
+setting_exists() {
+    local key="$1"
+    grep -qE "^[[:space:]]*$key[[:space:]]+" "$SSHD_CONFIG"
+}
 
-if [[ "$permit_root_set" == "true" && "$password_auth_set" == "true" ]]; then
-    echo "Root SSH login with password authentication is already enabled in sshd_config."
-    exit 0
-fi
+# Check existing settings
+permit_root_set=false
+password_auth_set=false
+challenge_response_set=false
+use_pam_set=false
 
-echo "Root password SSH login is NOT fully enabled. Applying changes..."
-echo "Backing up $SSHD_CONFIG to $BACKUP"
-cp "$SSHD_CONFIG" "$BACKUP"
+setting_exists "PermitRootLogin" && grep -qE '^[[:space:]]*PermitRootLogin[[:space:]]+yes' "$SSHD_CONFIG" && permit_root_set=true
+setting_exists "PasswordAuthentication" && grep -qE '^[[:space:]]*PasswordAuthentication[[:space:]]+yes' "$SSHD_CONFIG" && password_auth_set=true
+setting_exists "ChallengeResponseAuthentication" && grep -qE '^[[:space:]]*ChallengeResponseAuthentication[[:space:]]+no' "$SSHD_CONFIG" && challenge_response_set=true
+setting_exists "UsePAM" && grep -qE '^[[:space:]]*UsePAM[[:space:]]+yes' "$SSHD_CONFIG" && use_pam_set=true
 
-# Remove existing conflicting lines (commented or not)
-sed -i '/^[#[:space:]]*PermitRootLogin[[:space:]]\+/d' "$SSHD_CONFIG"
-sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+/d' "$SSHD_CONFIG"
-sed -i '/^[#[:space:]]*ChallengeResponseAuthentication[[:space:]]\+/d' "$SSHD_CONFIG"
-sed -i '/^[#[:space:]]*UsePAM[[:space:]]\+/d' "$SSHD_CONFIG"
-
-# Append required settings
-cat <<EOF >> "$SSHD_CONFIG"
-
-# === ENABLE ROOT PASSWORD LOGIN ===
-PermitRootLogin yes
-PasswordAuthentication yes
-ChallengeResponseAuthentication no
-UsePAM yes
-EOF
-
-# Reload SSH safely
-if command -v systemctl >/dev/null; then
-    systemctl reload sshd || systemctl reload ssh
+if [[ "$permit_root_set" == "true" && "$password_auth_set" == "true" && "$challenge_response_set" == "true" && "$use_pam_set" == "true" ]]; then
+    echo "All required SSH settings are already configured."
 else
-    service sshd reload || service ssh reload
+    echo "Backing up $SSHD_CONFIG to $BACKUP"
+    cp "$SSHD_CONFIG" "$BACKUP"
+
+    # Update settings if missing
+    [[ "$permit_root_set" != "true" ]] && sed -i '/^[#[:space:]]*PermitRootLogin[[:space:]]\+/d' "$SSHD_CONFIG" && echo "PermitRootLogin yes" >> "$SSHD_CONFIG"
+    [[ "$password_auth_set" != "true" ]] && sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+/d' "$SSHD_CONFIG" && echo "PasswordAuthentication yes" >> "$SSHD_CONFIG"
+    [[ "$challenge_response_set" != "true" ]] && sed -i '/^[#[:space:]]*ChallengeResponseAuthentication[[:space:]]\+/d' "$SSHD_CONFIG" && echo "ChallengeResponseAuthentication no" >> "$SSHD_CONFIG"
+    [[ "$use_pam_set" != "true" ]] && sed -i '/^[#[:space:]]*UsePAM[[:space:]]\+/d' "$SSHD_CONFIG" && echo "UsePAM yes" >> "$SSHD_CONFIG"
+
+    # Reload SSH safely
+    if command -v systemctl >/dev/null; then
+        systemctl reload sshd || systemctl reload ssh
+    else
+        service sshd reload || service ssh reload
+    fi
+
+    echo "SSH configuration updated successfully."
+    echo "Ensure the root account has a password set with:"
+    echo "  passwd root"
 fi
 
 echo "Root SSH login with password authentication has been enabled in sshd_config."
