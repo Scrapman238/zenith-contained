@@ -1,52 +1,53 @@
 #!/bin/bash
 set -e
 
-if [ "$EUID" -ne 0 ]; then
-    echo "Running as non-root user."
+SSHD_CONFIG="/etc/ssh/sshd_config"
+BACKUP="/etc/ssh/sshd_config.bak.$(date +%F-%H%M%S)"
 
-    echo
-    echo "Enter password to set as ROOT password (input will be visible):"
-    read ROOT_PASS
+if [[ $EUID -ne 0 ]]; then
+  echo "Run this script as root"
+  exit 1
+fi
 
-    if [ -z "$ROOT_PASS" ]; then
-        echo "ERROR: Password cannot be empty."
-        exit 1
-    fi
+# Check if PermitRootLogin yes exists (ignoring comments and spaces)
+grep -qE '^[[:space:]]*PermitRootLogin[[:space:]]+yes' "$SSHD_CONFIG" && permit_root_set=true || permit_root_set=false
+grep -qE '^[[:space:]]*PasswordAuthentication[[:space:]]+yes' "$SSHD_CONFIG" && password_auth_set=true || password_auth_set=false
 
-    echo "Setting root password..."
-    echo "root:$ROOT_PASS" | sudo chpasswd
-
-    echo "Configuring SSH to allow root login..."
-
-    SSHD_CONFIG="/etc/ssh/sshd_config"
-
-    sudo cp -n "$SSHD_CONFIG" "${SSHD_CONFIG}.bak"
-
-    if sudo grep -qE '^\s*PermitRootLogin\s+' "$SSHD_CONFIG"; then
-        sudo sed -i 's/^\s*PermitRootLogin\s+.*/PermitRootLogin yes/' "$SSHD_CONFIG"
-    else
-        echo "PermitRootLogin yes" | sudo tee -a "$SSHD_CONFIG" >/dev/null
-    fi
-
-    if sudo grep -qE '^\s*PasswordAuthentication\s+' "$SSHD_CONFIG"; then
-        sudo sed -i 's/^\s*PasswordAuthentication\s+.*/PasswordAuthentication yes/' "$SSHD_CONFIG"
-    else
-        echo "PasswordAuthentication yes" | sudo tee -a "$SSHD_CONFIG" >/dev/null
-    fi
-
-    echo "Restarting SSH service..."
-    sudo systemctl restart ssh || sudo systemctl restart sshd
-
-    echo
-    echo "===================================================="
-    echo " Root password set and root SSH access enabled."
-    echo
-    echo " IMPORTANT:"
-    echo "  - Log in as root (su - OR ssh root@host)"
-    echo "  - Re-run this script as root to continue"
-    echo "===================================================="
+if [[ "$permit_root_set" == "true" && "$password_auth_set" == "true" ]]; then
+    echo "Root SSH login with password authentication is already enabled in sshd_config."
     exit 0
 fi
+
+echo "Root password SSH login is NOT fully enabled. Applying changes..."
+echo "Backing up $SSHD_CONFIG to $BACKUP"
+cp "$SSHD_CONFIG" "$BACKUP"
+
+# Remove existing conflicting lines (commented or not)
+sed -i '/^[#[:space:]]*PermitRootLogin[[:space:]]\+/d' "$SSHD_CONFIG"
+sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+/d' "$SSHD_CONFIG"
+sed -i '/^[#[:space:]]*ChallengeResponseAuthentication[[:space:]]\+/d' "$SSHD_CONFIG"
+sed -i '/^[#[:space:]]*UsePAM[[:space:]]\+/d' "$SSHD_CONFIG"
+
+# Append required settings
+cat <<EOF >> "$SSHD_CONFIG"
+
+# === ENABLE ROOT PASSWORD LOGIN ===
+PermitRootLogin yes
+PasswordAuthentication yes
+ChallengeResponseAuthentication no
+UsePAM yes
+EOF
+
+# Reload SSH safely
+if command -v systemctl >/dev/null; then
+    systemctl reload sshd || systemctl reload ssh
+else
+    service sshd reload || service ssh reload
+fi
+
+echo "Root SSH login with password authentication has been enabled in sshd_config."
+echo "Ensure the root account has a password set with:"
+echo "  passwd root"
 
 cd /root
 
