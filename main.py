@@ -129,7 +129,7 @@ def list_containers():
 
     for c in sorted(containers, key=lambda x: x.name):
         instance_number = int(c.name.replace("instance_", ""))
-        port = instance_to_port(instance_number, ports_per_instance)
+        port = instance_to_port(8080, instance_number, ports_per_instance)
 
         outbound_ip = get_instance_outbound_ip(instance_number)
 
@@ -153,9 +153,8 @@ def get_instance_outbound_ip(instance_number):
         return EXTRA_IPS[index]
     return None
 
-def instance_to_port(instance_number, ports_per_instance=1):
-    BASE_PORT = 9000
-    return BASE_PORT + (instance_number - 1) * ports_per_instance
+def instance_to_port(base_port, instance_number, ports_per_instance=1):
+    return base_port + (instance_number - 1) * ports_per_instance
 
 def get_next_instance_name():
     existing = [int(c["name"].replace("instance_", "")) for c in list_containers()]
@@ -223,7 +222,8 @@ def create_container(name):
     else:
         outbound_ip = EXTRA_IPS[instance_number - 2]
 
-    port = instance_to_port(instance_number, ports_per_instance)
+    port = instance_to_port(8080, instance_number, ports_per_instance)
+    proxy_port = instance_to_port(3000, instance_number, 1)
 
     c = client.containers.create(
         ZENITH_IMAGE_NAME,
@@ -232,6 +232,7 @@ def create_container(name):
         ports={
             "8080/tcp": port,
             "8081/tcp": port + 1,
+            "3000/tcp": proxy_port,
         },
     )
 
@@ -290,7 +291,7 @@ def update_discord(name):
     except ValueError:
         return jsonify({"error": "Invalid container name"}), 400
 
-    port = instance_to_port(instance_number, ports_per_instance) + 1
+    port = instance_to_port(8080, instance_number, ports_per_instance) + 1
     url = f"http://localhost:{port}/update-discord"
 
     try:
@@ -310,7 +311,7 @@ def api_status(name):
     except ValueError:
         return jsonify({"error": "Invalid container name"}), 400
 
-    port = instance_to_port(instance_number, ports_per_instance)
+    port = instance_to_port(8080, instance_number, ports_per_instance)
     url = f"http://localhost:{port}/command"
 
     try:
@@ -345,7 +346,7 @@ def api_send_command(name):
     except ValueError:
         return jsonify({"error": "Invalid container name"}), 400
 
-    port = instance_to_port(instance_number, ports_per_instance)
+    port = instance_to_port(8080, instance_number, ports_per_instance)
     url = f"http://localhost:{port}/command"
 
     try:
@@ -411,7 +412,7 @@ def api_get_code(name):
     except ValueError:
         return jsonify({"error": "Invalid container name"}), 400
 
-    port = instance_to_port(instance_number, ports_per_instance) + 1
+    port = instance_to_port(8080, instance_number, ports_per_instance) + 1
     url = f"http://localhost:{port}/code"
 
     try:
@@ -432,7 +433,7 @@ def api_container_logout(name):
     except ValueError:
         return jsonify({"error": "Invalid container name"}), 400
 
-    port = instance_to_port(instance_number, ports_per_instance) + 1
+    port = instance_to_port(8080, instance_number, ports_per_instance) + 1
     url = f"http://localhost:{port}/logout"
 
     try:
