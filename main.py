@@ -222,7 +222,7 @@ def create_container(name):
     else:
         outbound_ip = EXTRA_IPS[instance_number - 2]
 
-    port = instance_to_port(8080, instance_number, ports_per_instance)
+    port = instance_to_port(9000, instance_number, ports_per_instance)
     proxy_port = instance_to_port(6000, instance_number, 1)
 
     c = client.containers.create(
