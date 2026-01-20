@@ -137,6 +137,7 @@ function createInstanceUI(c) {
         <div class="other-info">
             <span data-status>${c.status} <i class="mdi mdi-information-box"></i></span>
             <span data-port>Port ${c.port} <i class="mdi mdi-server"></i></span>
+            <span data-ip>IP ${c.ip} <i class="mdi mdi-web"></i></span>
         </div>
         <div class="actions-btn">
             <button><i class="mdi mdi-dots-vertical"></i></button>
@@ -198,10 +199,12 @@ function updateInstanceUI(c) {
 
   const statusEl = el.querySelector("[data-status]");
   const portEl = el.querySelector("[data-port]");
+  const ipEl = el.querySelector("[data-ip]");
 
   // Update text without replacing icons
   statusEl.childNodes[0].textContent = c.status + " ";
   portEl.childNodes[0].textContent = "Port " + c.port + " ";
+  ipEl.childNodes[0].textContent = "IP " + c.ip + " ";
 }
 
 // ---- Poll container status ----

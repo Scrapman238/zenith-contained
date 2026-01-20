@@ -67,6 +67,9 @@ else
     rm -rf "$TMP_DIR"
 fi
 
+cp /root/Zenith/run.sh /root/launch
+chmod +x /root/launch
+
 ZENITH_TAR="/root/Zenith/docker_image/zenith-proxy.tar"
 
 if [ -f "$ZENITH_TAR" ]; then

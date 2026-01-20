@@ -8,6 +8,34 @@ import docker
 import os
 import re
 
+def get_public_ip():
+    try:
+        response = requests.get("https://api.ipify.org")
+        response.raise_for_status()
+        return response.text
+    except requests.RequestException:
+        return None
+
+IPS_FILE = "/root/ips.txt"
+
+PRIMARY_IP = get_public_ip()
+EXTRA_IPS = []
+
+if os.path.exists(IPS_FILE):
+    with open(IPS_FILE, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                EXTRA_IPS.append(line)
+else:
+    print(f"[WARN] IPs file '{IPS_FILE}' not found. No extra IPs loaded.")
+    print("[INFO] Creating blank ips.txt file for you to edit.")
+    with open(IPS_FILE, "w") as f:
+        f.write("# Add extra IPs here, one per line.\n")
+
+print(f"[INFO] Primary IP: {PRIMARY_IP}")
+print(f"[INFO] Extra IPs: {EXTRA_IPS}")
+
 def verify_root_password(password: str) -> bool:
     try:
         p = subprocess.run(
@@ -99,10 +127,11 @@ def list_containers():
 
     result = []
 
-    for i, c in enumerate(sorted(containers, key=lambda x: x.name)):
+    for c in sorted(containers, key=lambda x: x.name):
         instance_number = int(c.name.replace("instance_", ""))
-
         port = instance_to_port(instance_number, ports_per_instance)
+
+        outbound_ip = get_instance_outbound_ip(instance_number)
 
         result.append({
             "id": c.id[:12],
@@ -111,9 +140,18 @@ def list_containers():
             "status": c.status.title(),
             "port": port,
             "url": f"http://localhost:{port}",
+            "ip": outbound_ip,  # ✅ NEW FIELD
         })
 
     return sorted(result, key=lambda x: x["instance"])
+
+def get_instance_outbound_ip(instance_number):
+    if instance_number == 1:
+        return PRIMARY_IP
+    index = instance_number - 2
+    if 0 <= index < len(EXTRA_IPS):
+        return EXTRA_IPS[index]
+    return None
 
 def instance_to_port(instance_number, ports_per_instance=1):
     BASE_PORT = 9000
@@ -125,6 +163,37 @@ def get_next_instance_name():
     while i in existing:
         i += 1
     return f"instance_{i}"
+
+def get_next_instance_name():
+    existing = sorted(
+        int(c["name"].replace("instance_", ""))
+        for c in list_containers()
+    )
+
+    i = 1
+    while i in existing:
+        i += 1
+
+    if i == 1:
+        return "instance_1"
+
+    if i - 2 >= len(EXTRA_IPS):
+        return None
+
+    return f"instance_{i}"
+
+def set_container_snat(container_name, host_ip):
+    container = client.containers.get(container_name)
+    container_ip = container.attrs["NetworkSettings"]["IPAddress"]
+
+    subprocess.run([
+        "iptables", "-t", "nat", "-A", "POSTROUTING",
+        "-s", container_ip,
+        "-j", "SNAT",
+        "--to-source", host_ip
+    ], check=True)
+
+    print(f"[INFO] {container_name} outbound → {host_ip}")
 
 def start_container(name):
     c = client.containers.get(name)
@@ -148,6 +217,12 @@ def remove_container(name):
 
 def create_container(name):
     instance_number = int(name.replace("instance_", ""))
+
+    if instance_number == 1:
+        outbound_ip = PRIMARY_IP
+    else:
+        outbound_ip = EXTRA_IPS[instance_number - 2]
+
     port = instance_to_port(instance_number, ports_per_instance)
 
     c = client.containers.create(
@@ -159,6 +234,12 @@ def create_container(name):
             "8081/tcp": port + 1,
         },
     )
+
+    c.start()
+
+    if instance_number > 1:
+        set_container_snat(name, outbound_ip)
+
     return c.status
 
 # --- API routes ---
@@ -171,6 +252,12 @@ def api_list():
 @login_required
 def api_add():
     name = get_next_instance_name()
+    if not name:
+        return jsonify({
+            "status": "error",
+            "message": "No free IPs available"
+        }), 400
+
     create_container(name)
     return jsonify({"status": "created", "name": name})
 
@@ -358,14 +445,6 @@ def api_container_logout(name):
             "message": str(e)
         }), 500
 
-def get_public_ip():
-    try:
-        response = requests.get("https://api.ipify.org")
-        response.raise_for_status()
-        return response.text
-    except requests.RequestException:
-        return None
-
 def print_qr_ascii(data):
     qr = qrcode.QRCode(border=2)
     qr.add_data(data)
@@ -386,6 +465,38 @@ def print_qr_ascii(data):
 
             line += f"{fg}{bg}▀{RESET}"
         print(line)
+
+def update_netplan(extra_ips):
+    if not extra_ips:
+        print("[INFO] No extra IPs → netplan unchanged")
+        return
+
+    iface = None
+    for line in os.popen("ip -o link show").read().splitlines():
+        name = line.split(":")[1].strip()
+        if name != "lo":
+            iface = name
+            break
+
+    if not iface:
+        print("[ERROR] Could not detect interface")
+        return
+
+    addresses = "\n".join(f"           - {ip}/32" for ip in extra_ips)
+
+    netplan = f"""network:
+   version: 2
+   ethernets:
+       {iface}:
+           dhcp4: true
+           addresses:
+{addresses}
+"""
+
+    with open("/etc/netplan/51-cloud-init.yaml", "w") as f:
+        f.write(netplan)
+
+    print("[INFO] Netplan updated")
 
 if __name__ == "__main__":
     public_ip = get_public_ip()
