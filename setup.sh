@@ -1,6 +1,53 @@
 #!/bin/bash
 set -e
 
+if [ "$EUID" -ne 0 ]; then
+    echo "Running as non-root user."
+
+    echo
+    echo "Enter password to set as ROOT password (input will be visible):"
+    read ROOT_PASS
+
+    if [ -z "$ROOT_PASS" ]; then
+        echo "ERROR: Password cannot be empty."
+        exit 1
+    fi
+
+    echo "Setting root password..."
+    echo "root:$ROOT_PASS" | sudo chpasswd
+
+    echo "Configuring SSH to allow root login..."
+
+    SSHD_CONFIG="/etc/ssh/sshd_config"
+
+    sudo cp -n "$SSHD_CONFIG" "${SSHD_CONFIG}.bak"
+
+    if sudo grep -qE '^\s*PermitRootLogin\s+' "$SSHD_CONFIG"; then
+        sudo sed -i 's/^\s*PermitRootLogin\s+.*/PermitRootLogin yes/' "$SSHD_CONFIG"
+    else
+        echo "PermitRootLogin yes" | sudo tee -a "$SSHD_CONFIG" >/dev/null
+    fi
+
+    if sudo grep -qE '^\s*PasswordAuthentication\s+' "$SSHD_CONFIG"; then
+        sudo sed -i 's/^\s*PasswordAuthentication\s+.*/PasswordAuthentication yes/' "$SSHD_CONFIG"
+    else
+        echo "PasswordAuthentication yes" | sudo tee -a "$SSHD_CONFIG" >/dev/null
+    fi
+
+    echo "Restarting SSH service..."
+    sudo systemctl restart ssh || sudo systemctl restart sshd
+
+    echo
+    echo "===================================================="
+    echo " Root password set and root SSH access enabled."
+    echo
+    echo " IMPORTANT:"
+    echo "  - Log in as root (su - OR ssh root@host)"
+    echo "  - Re-run this script as root to continue"
+    echo "===================================================="
+    exit 0
+fi
+
 cd /root
 
 echo "Updating package index..."
