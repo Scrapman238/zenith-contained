@@ -55,6 +55,17 @@ def container_update_discord():
 
     return jsonify({"status": "ok"})
 
+@app.route("/super_command", methods=["POST"])
+def super_command():
+    data = request.get_json(silent=True)
+
+    if not data or "command" not in data:
+        return jsonify({"status": "error", "message": "Missing 'command'"}), 400
+
+    send_command(data["command"])
+
+    return jsonify({"status": "ok"})
+
 # ------------------------
 # Zenith command sender (unchanged)
 # ------------------------

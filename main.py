@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, send_from_directory, session, redirect
+from flask import Flask, jsonify, request, send_from_directory, session, redirect, send_file
 from functools import wraps
 from waitress import serve
 import subprocess
@@ -16,8 +16,16 @@ def get_public_ip():
     except requests.RequestException:
         return None
 
-PASSWORD_FILE = "/root/password.txt"
-IPS_FILE = "/root/ips.txt"
+CONFIG_DIR = "/root/config"
+
+CUSTOM_BG_PREFIX = "background."
+DEFAULT_BG_PATH = os.path.join("static", "bg.png")
+ALLOWED_BACKGROUND_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
+
+os.makedirs(CONFIG_DIR, exist_ok=True)
+
+PASSWORD_FILE = "/root/config/password.txt"
+IPS_FILE = "/root/config/ips.txt"
 
 if not os.path.exists(PASSWORD_FILE):
     print(f"[ERROR] Password file '{PASSWORD_FILE}' not found. Please create it with the root password.")
@@ -225,9 +233,9 @@ def create_container(name):
         name=name,
         detach=True,
         ports={
-            "8080/tcp": port,
-            "8081/tcp": port + 1,
-            "3000/tcp": proxy_port,
+            "8080/tcp": ("127.0.0.1", port),
+            "8081/tcp": ("127.0.0.1", port + 1),
+            "3000/tcp": ("0.0.0.0", proxy_port),
         },
     )
 
@@ -362,6 +370,40 @@ def api_send_command(name):
     except requests.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route("/api/containers/<name>/send_super_command", methods=["POST"])
+@login_required
+def api_send_super_command(name):
+    data = request.get_json()
+    if not data or "command" not in data:
+        return jsonify({"error": "Missing 'command' in request body"}), 400
+
+    command = data["command"]
+
+    try:
+        instance_number = int(name.replace("instance_", ""))
+    except ValueError:
+        return jsonify({"error": "Invalid container name"}), 400
+
+    port = instance_to_port(8080, instance_number, ports_per_instance) + 1
+    url = f"http://localhost:{port}/super_command"
+
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "Content-Type": "application/json"
+            },
+            json={"command": command},
+            timeout=3
+        )
+        return jsonify({
+            "status": "success",
+            "response_code": response.status_code,
+            "response_body": response.json() if response.content else {}
+        })
+    except requests.RequestException as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route("/")
 @login_required
 def index():
@@ -376,17 +418,7 @@ def login():
             return redirect("/")
         return "Invalid password", 401
 
-    return """
-    <html>
-        <body>
-            <h2>Zenith Manager Login</h2>
-            <form method="POST">
-                <input type="password" name="password" placeholder="Root password" />
-                <button type="submit">Login</button>
-            </form>
-        </body>
-    </html>
-    """
+    return send_from_directory("static", "login.html")
 
 @app.route("/logout", methods=["POST"])
 def logout():
@@ -398,6 +430,60 @@ def logout():
 @login_required
 def static_files(path):
     return send_from_directory("static", path)
+
+@app.route("/static/mojangles.otf", methods=["GET"])
+def mojangles_font():
+    return send_from_directory("static", "mojangles.otf")
+
+@app.route("/api/ui/background/change", methods=["POST"])
+@login_required
+def change_background():
+    if "background" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files["background"]
+
+    if file.filename == "":
+        return jsonify({"error": "Empty filename"}), 400
+
+    ext = file.filename.rsplit(".", 1)[1].lower()
+    if ext not in ALLOWED_BACKGROUND_EXTENSIONS:
+        return jsonify({"error": "Invalid file type"}), 400
+
+    # Remove any existing custom background
+    for f in os.listdir(CONFIG_DIR):
+        if f.startswith(CUSTOM_BG_PREFIX):
+            os.remove(os.path.join(CONFIG_DIR, f))
+
+    path = os.path.join(CONFIG_DIR, f"{CUSTOM_BG_PREFIX}{ext}")
+    file.save(path)
+
+    return jsonify({"status": "ok"})
+
+@app.route("/api/ui/background/reset", methods=["POST"])
+@login_required
+def reset_background():
+    for f in os.listdir(CONFIG_DIR):
+        if f.startswith(CUSTOM_BG_PREFIX):
+            os.remove(os.path.join(CONFIG_DIR, f))
+
+    return jsonify({"status": "reset", "background": "default"})
+
+@app.route("/background", methods=["GET"])
+@login_required
+def serve_background():
+    # Serve custom background if present
+    for f in os.listdir(CONFIG_DIR):
+        if f.startswith(CUSTOM_BG_PREFIX):
+            return send_file(
+                os.path.join(CONFIG_DIR, f),
+                conditional=True
+            )
+
+    return send_file(
+        DEFAULT_BG_PATH,
+        conditional=True
+    )
 
 @app.route("/api/containers/<name>/code", methods=["GET"])
 @login_required

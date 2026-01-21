@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zenith Manager Login</title>
+    <style>
+      @font-face {
+        font-family: "Mojangles";
+        src: url("/static/mojangles.otf") format("opentype");
+      }
+
+      body {
+        font-family: sans-serif;
+        padding: 0;
+        background: linear-gradient(to bottom right, #15c1d1, #9bcace);
+        color: white;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        gap: 60px;
+      }
+
+      h2 {
+        font-family: "Mojangles", monospace;
+        font-weight: normal;
+        font-size: 56px;
+        margin: 0;
+      }
+
+      form {
+        padding: 0;
+        gap: 20px;
+        display: flex;
+        align-items: center;
+        flex-direction: column;
+      }
+
+      form input {
+        width: 350px;
+        height: 40px;
+        border: 1px solid #444;
+        background: #111;
+        border-radius: 10px;
+        color: white;
+        font-size: 24px;
+        text-align: center;
+      }
+
+      form button {
+        width: 150px;
+        height: 75px;
+        background-color: #3cbf3c;
+        border: 3px solid #2e8f2e;
+        font-size: 36px;
+        color: #ffffff;
+        cursor: pointer;
+        font-family: "Mojangles", monospace;
+        transform: translateZ(0);
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Zenith Manager Login</h2>
+    <form method="POST">
+      <input type="password" name="password" placeholder="Password" />
+      <button type="submit">Login</button>
+    </form>
+  </body>
+</html>

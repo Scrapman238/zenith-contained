@@ -144,7 +144,7 @@ function createInstanceUI(c) {
             <div class="context-menu">
                 <span onclick="start('${c.name}')"><i class="mdi mdi-play"></i> Start</span>
                 <span onclick="stop('${c.name}')"><i class="mdi mdi-stop"></i> Stop</span>
-                <span onclick="restart('${c.name}')"><i class="mdi mdi-refresh"></i> Restart</span>
+                <span onclick="restart('${c.name}')"><i class="mdi mdi-restart"></i> Restart</span>
                 <span class="delete-btn" onclick="del('${c.name}')"><i class="mdi mdi-delete"></i> Delete</span>
             </div>
         </div>
@@ -156,11 +156,44 @@ function createInstanceUI(c) {
             <input type="text" id="role" name="role" placeholder="Role ID">
             <button type="submit">Update</button>
         </form>
+        <input
+          type="text"
+          class="super-command-input"
+          data-container="${c.name}"
+          placeholder="Super cmd"
+        />
     </div>
   `;
 
   containerMap.set(c.name, li);
   document.getElementById("instances").appendChild(li);
+
+  const superInput = li.querySelector(".super-command-input");
+
+  superInput.addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter") return;
+
+    const command = superInput.value.trim();
+    if (!command) return;
+
+    superInput.value = "";
+
+    try {
+      const res = await fetch(`/api/containers/${c.name}/send_super_command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        console.error(`${c.name} super command error`, data);
+      }
+    } catch (err) {
+      console.error(`${c.name} super command failed`, err);
+    }
+  });
 
   // Actions menu toggle
   const btn = li.querySelector(".actions-btn button");
@@ -417,3 +450,57 @@ document.addEventListener("click", () => {
 // ---- Start polling containers ----
 setInterval(fetchContainers, 1000);
 fetchContainers();
+
+const backgroundDiv = document.querySelector(".background");
+const fileInput = document.getElementById("imageInput");
+const resetBtn = document.getElementById("resetBackgroundBtn");
+
+function refreshBackground() {
+  const newImageUrl = `/background?ts=${Date.now()}`;
+  backgroundDiv.style.backgroundImage = `url('${newImageUrl}')`;
+}
+
+refreshBackground();
+
+fileInput.addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    alert("Please upload an image file.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("background", file);
+
+  try {
+    const response = await fetch("/api/ui/background/change", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) throw new Error("Upload failed");
+
+    console.log("Background updated");
+  } catch (err) {
+    console.error("Error uploading background:", err);
+  }
+
+  fileInput.value = "";
+
+  setTimeout(refreshBackground, 250);
+});
+
+resetBtn.addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/ui/background/reset", { method: "POST" });
+    if (!res.ok) throw new Error("Reset failed");
+
+    console.log("Background reset");
+  } catch (err) {
+    console.error(err);
+  }
+
+  setTimeout(refreshBackground, 250);
+});
