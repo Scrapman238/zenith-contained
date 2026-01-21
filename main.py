@@ -16,7 +16,15 @@ def get_public_ip():
     except requests.RequestException:
         return None
 
+PASSWORD_FILE = "/root/password.txt"
 IPS_FILE = "/root/ips.txt"
+
+if not os.path.exists(PASSWORD_FILE):
+    print(f"[ERROR] Password file '{PASSWORD_FILE}' not found. Please create it with the root password.")
+    exit(1)
+
+with open(PASSWORD_FILE, "r") as f:
+    ROOT_PASSWORD = f.read().strip()
 
 PRIMARY_IP = get_public_ip()
 EXTRA_IPS = []
@@ -35,19 +43,6 @@ else:
 
 print(f"[INFO] Primary IP: {PRIMARY_IP}")
 print(f"[INFO] Extra IPs: {EXTRA_IPS}")
-
-def verify_root_password(password: str) -> bool:
-    try:
-        p = subprocess.run(
-            ["sudo", "-k", "-S", "true"],
-            input=password + "\n",
-            text=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        return p.returncode == 0
-    except Exception:
-        return False
 
 def login_required(f):
     @wraps(f)
@@ -376,7 +371,7 @@ def index():
 def login():
     if request.method == "POST":
         password = request.form.get("password", "")
-        if verify_root_password(password):
+        if password == ROOT_PASSWORD:
             session["authenticated"] = True
             return redirect("/")
         return "Invalid password", 401
