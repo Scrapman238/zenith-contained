@@ -594,4 +594,6 @@ if __name__ == "__main__":
     if public_ip != "0.0.0.0":
         print_qr_ascii(f"http://{public_ip}:8000/")
 
+    update_netplan(EXTRA_IPS)
+
     serve(app, host="0.0.0.0", port=8000)
