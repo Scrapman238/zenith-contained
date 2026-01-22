@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request, send_from_directory, session, redirect, send_file
+from datetime import datetime
 from functools import wraps
 from waitress import serve
 import subprocess
@@ -7,6 +8,15 @@ import qrcode
 import docker
 import os
 import re
+
+def log_info(message):
+    print(f"\033[92m[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] \033[0m\033[34m[INFO]\033[0m {message}")
+
+def log_warn(message):
+    print(f"\033[93m[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] \033[0m\033[33m[WARN]\033[0m {message}")
+
+def log_error(message):
+    print(f"\033[91m[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] \033[0m\033[31m[ERROR]\033[0m {message}")
 
 def get_public_ip():
     try:
@@ -115,9 +125,11 @@ ZENITH_IMAGE_NAME = "zenith-proxy:latest"
 def load_zenith_image():
     try:
         client.images.get(ZENITH_IMAGE_NAME)
+        log_info(f"Zenith image '{ZENITH_IMAGE_NAME}' already present")
     except docker.errors.ImageNotFound:
-        print("Loading Zenith image...")
+        log_info("Loading Zenith image...")
         client.images.load(open(ZENITH_IMAGE_PATH, "rb").read())
+        log_info("Zenith image loaded")
 
 load_zenith_image()
 
@@ -127,6 +139,8 @@ def list_containers():
         all=True,
         filters={"ancestor": ZENITH_IMAGE_NAME}
     )
+
+    log_info(f"Found {len(containers)} containers for image {ZENITH_IMAGE_NAME}")
 
     result = []
 
@@ -188,33 +202,55 @@ def set_container_snat(container_name, host_ip):
     container = client.containers.get(container_name)
     container_ip = container.attrs["NetworkSettings"]["IPAddress"]
 
-    subprocess.run([
-        "iptables", "-t", "nat", "-A", "POSTROUTING",
+    # Check if rule already exists
+    rule_check = [
+        "iptables", "-t", "nat", "-C", "POSTROUTING",
         "-s", container_ip,
         "-j", "SNAT",
         "--to-source", host_ip
-    ], check=True)
-
-    print(f"[INFO] {container_name} outbound → {host_ip}")
+    ]
+    try:
+        subprocess.run(rule_check, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        log_info(f"SNAT rule already exists for {container_name} → {host_ip}")
+    except subprocess.CalledProcessError:
+        # Rule does not exist, add it
+        subprocess.run([
+            "iptables", "-t", "nat", "-A", "POSTROUTING",
+            "-s", container_ip,
+            "-j", "SNAT",
+            "--to-source", host_ip
+        ], check=True)
+        log_info(f"{container_name} outbound → {host_ip}")
 
 def start_container(name):
+    log_info(f"Starting container {name}")
     c = client.containers.get(name)
     c.start()
-    return c.status
+    status = c.status
+    log_info(f"Container {name} status after start: {status}")
+    return status
 
 def stop_container(name):
+    log_info(f"Stopping container {name}")
     c = client.containers.get(name)
     c.stop()
-    return c.status
+    status = c.status
+    log_info(f"Container {name} status after stop: {status}")
+    return status
 
 def restart_container(name):
+    log_info(f"Restarting container {name}")
     c = client.containers.get(name)
     c.restart()
-    return c.status
+    status = c.status
+    log_info(f"Container {name} status after restart: {status}")
+    return status
 
 def remove_container(name):
+    log_info(f"Removing container {name}")
     c = client.containers.get(name)
     c.remove(force=True)
+    log_info(f"Container {name} removed")
     return True
 
 def create_container(name):
@@ -235,14 +271,18 @@ def create_container(name):
         ports={
             "8080/tcp": ("127.0.0.1", port),
             "8081/tcp": ("127.0.0.1", port + 1),
-            "3000/tcp": (outbound_ip, proxy_port),
+            "3000/tcp": ("0.0.0.0", proxy_port),
         },
     )
 
     c.start()
 
-    # if instance_number > 1:
-    #     set_container_snat(name, outbound_ip)
+    log_info(f"Creating: {name} outbound → {outbound_ip}")
+    log_info(f"Published ports for {name}: 8080→{port}, 8081→{port+1}, proxy→{proxy_port}")
+
+    if instance_number > 1:
+        set_container_snat(name, outbound_ip)
+        log_info(f"Applied SNAT for {name} → {outbound_ip}")
 
     return c.status
 
@@ -250,6 +290,7 @@ def create_container(name):
 @app.route("/api/containers")
 @login_required
 def api_list():
+    log_info("API: list containers")
     return jsonify(list_containers())
 
 @app.route("/api/containers/add", methods=["POST"])
@@ -257,32 +298,38 @@ def api_list():
 def api_add():
     name = get_next_instance_name()
     if not name:
+        log_warn("API: add container failed — no free IPs available")
         return jsonify({
             "status": "error",
             "message": "No free IPs available"
         }), 400
 
+    log_info(f"API: creating container {name}")
     create_container(name)
     return jsonify({"status": "created", "name": name})
 
 @app.route("/api/containers/<name>/start", methods=["POST"])
 @login_required
 def api_start(name):
+    log_info(f"API: start {name}")
     return jsonify({"status": start_container(name)})
 
 @app.route("/api/containers/<name>/stop", methods=["POST"])
 @login_required
 def api_stop(name):
+    log_info(f"API: stop {name}")
     return jsonify({"status": stop_container(name)})
 
 @app.route("/api/containers/<name>/restart", methods=["POST"])
 @login_required
 def api_restart(name):
+    log_info(f"API: restart {name}")
     return jsonify({"status": restart_container(name)})
 
 @app.route("/api/containers/<name>/delete", methods=["POST"])
 @login_required
 def api_delete(name):
+    log_info(f"API: delete {name}")
     remove_container(name)
     return jsonify({"status": "deleted"})
 
@@ -439,15 +486,18 @@ def mojangles_font():
 @login_required
 def change_background():
     if "background" not in request.files:
+        log_warn("API: background change attempted without file")
         return jsonify({"error": "No file provided"}), 400
 
     file = request.files["background"]
 
     if file.filename == "":
+        log_warn("API: background change attempted with empty filename")
         return jsonify({"error": "Empty filename"}), 400
 
     ext = file.filename.rsplit(".", 1)[1].lower()
     if ext not in ALLOWED_BACKGROUND_EXTENSIONS:
+        log_warn(f"API: background change invalid extension: {ext}")
         return jsonify({"error": "Invalid file type"}), 400
 
     # Remove any existing custom background
@@ -458,6 +508,8 @@ def change_background():
     path = os.path.join(CONFIG_DIR, f"{CUSTOM_BG_PREFIX}{ext}")
     file.save(path)
 
+    log_info(f"Background changed, saved to {path}")
+
     return jsonify({"status": "ok"})
 
 @app.route("/api/ui/background/reset", methods=["POST"])
@@ -467,6 +519,7 @@ def reset_background():
         if f.startswith(CUSTOM_BG_PREFIX):
             os.remove(os.path.join(CONFIG_DIR, f))
 
+    log_info("Background reset to default")
     return jsonify({"status": "reset", "background": "default"})
 
 @app.route("/background", methods=["GET"])
@@ -550,7 +603,7 @@ def print_qr_ascii(data):
 
 def update_netplan(extra_ips):
     if not extra_ips:
-        print("[INFO] No extra IPs → netplan unchanged")
+        log_info("No extra IPs → netplan unchanged")
         return
 
     iface = None
@@ -561,7 +614,7 @@ def update_netplan(extra_ips):
             break
 
     if not iface:
-        print("[ERROR] Could not detect interface")
+        log_error("Could not detect interface for netplan update")
         return
 
     addresses = "\n".join(f"           - {ip}/32" for ip in extra_ips)
@@ -578,12 +631,12 @@ def update_netplan(extra_ips):
     with open("/etc/netplan/51-cloud-init.yaml", "w") as f:
         f.write(netplan)
 
-    print("[INFO] Netplan updated")
+    log_info("Netplan updated")
 
 if __name__ == "__main__":
     public_ip = get_public_ip()
     if not public_ip:
-        print("[ERROR] Could not determine public IP.")
+        log_error("Could not determine public IP.")
         public_ip = "0.0.0.0"
 
     os.system("clear")
@@ -596,4 +649,5 @@ if __name__ == "__main__":
 
     update_netplan(EXTRA_IPS)
 
+    log_info(f"Starting server on 0.0.0.0:8000 (public ip {public_ip})")
     serve(app, host="0.0.0.0", port=8000)
