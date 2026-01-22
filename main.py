@@ -256,10 +256,7 @@ def remove_container(name):
 def create_container(name):
     instance_number = int(name.replace("instance_", ""))
 
-    if instance_number == 1:
-        outbound_ip = PRIMARY_IP
-    else:
-        outbound_ip = EXTRA_IPS[instance_number - 2]
+    outbound_ip = get_instance_outbound_ip(instance_number)
 
     port = instance_to_port(8080, instance_number, ports_per_instance)
     proxy_port = instance_to_port(6000, instance_number, 1)
@@ -277,12 +274,11 @@ def create_container(name):
 
     c.start()
 
-    log_info(f"Creating: {name} outbound → {outbound_ip}")
+    log_info(f"SNAT: {name} outbound → {outbound_ip}")
     log_info(f"Published ports for {name}: 8080→{port}, 8081→{port+1}, proxy→{proxy_port}")
 
-    if instance_number > 1:
-        set_container_snat(name, outbound_ip)
-        log_info(f"Applied SNAT for {name} → {outbound_ip}")
+    set_container_snat(name, outbound_ip)
+    log_info(f"Applied SNAT for {name} → {outbound_ip}")
 
     return c.status
 
