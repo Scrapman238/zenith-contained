@@ -235,14 +235,14 @@ def create_container(name):
         ports={
             "8080/tcp": ("127.0.0.1", port),
             "8081/tcp": ("127.0.0.1", port + 1),
-            "3000/tcp": ("0.0.0.0", proxy_port),
+            "3000/tcp": (outbound_ip, proxy_port),
         },
     )
 
     c.start()
 
-    if instance_number > 1:
-        set_container_snat(name, outbound_ip)
+    # if instance_number > 1:
+    #     set_container_snat(name, outbound_ip)
 
     return c.status
 
