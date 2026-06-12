@@ -200,27 +200,38 @@ def get_next_instance_name():
 
 def set_container_snat(container_name, host_ip):
     container = client.containers.get(container_name)
-    container_ip = container.attrs["NetworkSettings"]["IPAddress"]
 
-    # Check if rule already exists
-    rule_check = [
-        "iptables", "-t", "nat", "-C", "POSTROUTING",
-        "-s", container_ip,
-        "-j", "SNAT",
-        "--to-source", host_ip
-    ]
+    container.reload()
+
+    container_ip = next(
+        iter(
+            container.attrs["NetworkSettings"]["Networks"].values()
+        )
+    )["IPAddress"]
+
+    log_info(f"Adding SNAT {container_ip} → {host_ip}")
+
     try:
-        subprocess.run(rule_check, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        log_info(f"SNAT rule already exists for {container_name} → {host_ip}")
-    except subprocess.CalledProcessError:
-        # Rule does not exist, add it
         subprocess.run([
-            "iptables", "-t", "nat", "-A", "POSTROUTING",
+            "iptables",
+            "-t", "nat",
+            "-C", "POSTROUTING",
             "-s", container_ip,
             "-j", "SNAT",
             "--to-source", host_ip
         ], check=True)
-        log_info(f"{container_name} outbound → {host_ip}")
+
+    except subprocess.CalledProcessError:
+        subprocess.run([
+            "iptables",
+            "-t", "nat",
+            "-I", "POSTROUTING", "1",
+            "-s", container_ip,
+            "-j", "SNAT",
+            "--to-source", host_ip
+        ], check=True)
+
+        log_info("SNAT rule added")
 
 def start_container(name):
     log_info(f"Starting container {name}")
@@ -626,6 +637,8 @@ def update_netplan(extra_ips):
 
     with open("/etc/netplan/51-cloud-init.yaml", "w") as f:
         f.write(netplan)
+
+    subprocess.run(["netplan", "apply"], check=True)
 
     log_info("Netplan updated")
 
