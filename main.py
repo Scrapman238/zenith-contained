@@ -233,6 +233,66 @@ def set_container_snat(container_name, host_ip):
 
         log_info("SNAT rule added")
 
+def restore_all_snat():
+    log_info("Restoring SNAT rules...")
+
+    containers = client.containers.list(
+        all=True,
+        filters={"ancestor": ZENITH_IMAGE_NAME}
+    )
+
+    for container in containers:
+        try:
+            instance_number = int(container.name.replace("instance_", ""))
+        except ValueError:
+            continue
+
+        outbound_ip = get_instance_outbound_ip(instance_number)
+
+        if not outbound_ip:
+            log_warn(f"{container.name}: no outbound IP assigned")
+            continue
+
+        container.reload()
+
+        networks = container.attrs["NetworkSettings"]["Networks"]
+
+        if not networks:
+            log_warn(f"{container.name}: no network found")
+            continue
+
+        container_ip = next(iter(networks.values()))["IPAddress"]
+
+        if not container_ip:
+            log_warn(f"{container.name}: no container IP")
+            continue
+
+        log_info(f"Restoring {container.name}: {container_ip} → {outbound_ip}")
+
+        try:
+            subprocess.run([
+                "iptables",
+                "-t", "nat",
+                "-C", "POSTROUTING",
+                "-s", container_ip,
+                "-j", "SNAT",
+                "--to-source", outbound_ip
+            ], check=True)
+
+            log_info(f"{container.name}: rule already exists")
+
+        except subprocess.CalledProcessError:
+            subprocess.run([
+                "iptables",
+                "-t", "nat",
+                "-I", "POSTROUTING", "1",
+                "-s", container_ip,
+                "-j", "SNAT",
+                "--to-source", outbound_ip
+            ], check=True)
+
+            log_info(f"{container.name}: SNAT restored")
+
 def start_container(name):
     log_info(f"Starting container {name}")
     c = client.containers.get(name)
@@ -276,6 +336,9 @@ def create_container(name):
         ZENITH_IMAGE_NAME,
         name=name,
         detach=True,
+        restart_policy={
+            "Name": "unless-stopped"
+        },
         ports={
             "8080/tcp": ("127.0.0.1", port),
             "8081/tcp": ("127.0.0.1", port + 1),
@@ -657,6 +720,7 @@ if __name__ == "__main__":
         print_qr_ascii(f"http://{public_ip}:8000/")
 
     update_netplan(EXTRA_IPS)
+    restore_all_snat()
 
     log_info(f"Starting server on 0.0.0.0:8000 (public ip {public_ip})")
     serve(app, host="0.0.0.0", port=8000)
